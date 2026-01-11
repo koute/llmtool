@@ -1,0 +1,49 @@
+{
+  "id": "GENERATION_ID",
+  "provider": "PROVIDER",
+  "model": "deepseek/deepseek-v3.2",
+  "object": "chat.completion",
+  "created": 1768065510,
+  "choices": [
+    {
+      "error": {
+        "message": "Network connection lost.",
+        "code": 502,
+        "metadata": {
+          "provider_name": "PROVIDER"
+        }
+      },
+      "logprobs": null,
+      "finish_reason": null,
+      "native_finish_reason": null,
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "DUMMY",
+        "refusal": null,
+        "reasoning": null
+      }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 14999,
+    "completion_tokens": 1716,
+    "total_tokens": 16715,
+    "cost": 0.00456898,
+    "is_byok": false,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0,
+      "video_tokens": 0
+    },
+    "cost_details": {
+      "upstream_inference_cost": null,
+      "upstream_inference_prompt_cost": 0.00389974,
+      "upstream_inference_completions_cost": 0.00066924
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 0,
+      "image_tokens": 0
+    }
+  }
+}

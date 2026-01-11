@@ -1,0 +1,27 @@
+[package]
+name = "llmtool"
+version = "0.1.0"
+edition = "2024"
+authors = ["Jan Bujak <jan@exia.io>"]
+license = "MIT/Apache-2.0"
+repository = "https://github.com/koute/llmtool"
+
+[[bin]]
+name = "lt"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.11", features = ["json"] }
+futures = "0.3"
+ctrlc = "3"
+clap = { version = "4.5.34", features = ["derive"] }
+memmap2 = "0.9.5"
+memchr = "2.7.5"
+rayon = "1.11.0"
+tikv-jemallocator = "0.6.1"
+blake3 = "1.8.2"
+ahash = "0.8.12"
+time = { version = "0.3", features = ["formatting", "local-offset"] }
