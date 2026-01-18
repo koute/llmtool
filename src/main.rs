@@ -119,6 +119,9 @@ pub struct SingleRequestArgs {
 
     #[clap(long, default_value = "auto")]
     stdin: IsEnabled,
+
+    #[clap(long)]
+    print_raw_response: bool,
 }
 
 #[derive(clap::Parser)]

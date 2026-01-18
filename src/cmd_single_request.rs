@@ -13,7 +13,12 @@ pub async fn main_single_request(
     thinking: Thinking,
     single_request_args: SingleRequestArgs,
 ) -> Result<(), String> {
-    let SingleRequestArgs { streaming, verbose, stdin } = single_request_args;
+    let SingleRequestArgs {
+        streaming,
+        verbose,
+        stdin,
+        print_raw_response,
+    } = single_request_args;
 
     use std::io::IsTerminal;
     let is_terminal = std::io::stdout().is_terminal();
@@ -69,7 +74,7 @@ pub async fn main_single_request(
 
     let use_cache = !streaming;
     let cache_address = "127.0.0.1:9999";
-    let mut cached_response: Option<openai_client::ResponseOk> = None;
+    let mut cached_response: Option<(openai_client::ResponseOk, Option<String>)> = None;
     let request_for_cache = if use_cache {
         let mut request_for_cache = request.clone();
         request_for_cache.args.max_tokens = None;
@@ -81,7 +86,7 @@ pub async fn main_single_request(
                 // Converting it back to string is silly, but whatever.
                 let response = openai_client::Response::from_raw(&serde_json::to_string(&response).unwrap(), Arc::new(String::new()));
                 if let Ok(Ok(response_ok)) = response.obj {
-                    cached_response = Some(response_ok);
+                    cached_response = Some((response_ok, response.raw));
                 }
 
                 Some(request_for_cache)
@@ -103,6 +108,13 @@ pub async fn main_single_request(
         let mut stream = request.send_streaming(&endpoint).await.map_err(|error| error.to_string())?;
 
         while let Some(chunk) = stream.next().await {
+            if print_raw_response {
+                if let Some(raw) = chunk.raw {
+                    println!("{raw}");
+                }
+                continue;
+            }
+
             let response = extract_response(&chunk)?;
             let out = std::io::stdout();
             let mut out = out.lock();
@@ -154,8 +166,8 @@ pub async fn main_single_request(
 
         println!();
     } else {
-        let response = if let Some(response_ok) = cached_response {
-            response_ok
+        let (response, response_raw) = if let Some(response) = cached_response {
+            response
         } else {
             let response = request.send(&endpoint).await;
             let response_ok = extract_response(&response)?;
@@ -171,23 +183,31 @@ pub async fn main_single_request(
                 }
             }
 
-            response_ok.clone()
+            (response_ok.clone(), response.raw)
         };
         let stdout = std::io::stdout();
         let mut stdout = stdout.lock();
-        match request.kind {
-            openai_client::RequestKind::Completion(ref request) => {
-                let _ = stdout.write_all(&request.prompt.as_bytes());
-                let _ = stdout.write_all(&response.text.as_bytes());
+        if print_raw_response {
+            if let Some(raw) = response_raw {
+                let _ = stdout.write_all(raw.as_bytes());
+            } else {
+                eprintln!("ERROR: Missing raw response!");
             }
-            openai_client::RequestKind::Chat(..) => {
-                if !hide_thinking {
-                    if let Some(ref reasoning_content) = response.reasoning_content {
-                        let _ = writeln!(stdout, "<think>{}</think>\n", reasoning_content);
-                    }
+        } else {
+            match request.kind {
+                openai_client::RequestKind::Completion(ref request) => {
+                    let _ = stdout.write_all(&request.prompt.as_bytes());
+                    let _ = stdout.write_all(&response.text.as_bytes());
                 }
+                openai_client::RequestKind::Chat(..) => {
+                    if !hide_thinking {
+                        if let Some(ref reasoning_content) = response.reasoning_content {
+                            let _ = writeln!(stdout, "<think>{}</think>\n", reasoning_content);
+                        }
+                    }
 
-                let _ = stdout.write_all(&response.text.as_bytes());
+                    let _ = stdout.write_all(&response.text.as_bytes());
+                }
             }
         }
         if is_terminal && !response.text.ends_with("\n") {
