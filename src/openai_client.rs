@@ -725,6 +725,11 @@ impl Request {
                                 return None;
                             }
 
+                            if chunk == "OPENROUTER PROCESSING" {
+                                state.buffer.drain(..chunk_length);
+                                continue;
+                            }
+
                             let chunk = parse_response(&chunk, raw_request);
                             state.buffer.drain(..chunk_length);
                             return Some((Ok(chunk), state));
