@@ -222,15 +222,15 @@ pub struct Usage {
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, serde::Serialize, serde::Deserialize)]
 struct RawFunctionCall {
-    name: String,
-    arguments: String,
+    name: Option<String>,
+    arguments: Option<String>,
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RawToolCall {
-    id: String,
+    id: Option<String>,
     #[serde(rename = "type")]
-    kind: String,
+    kind: Option<String>,
     // index: u64,
     function: Option<RawFunctionCall>,
 }
@@ -393,7 +393,7 @@ fn parse_response(raw_string: &str, original_request: Option<Arc<String>>, delta
                     true,
                     delta.content.unwrap_or(String::new()),
                     delta.reasoning_content.or(delta.reasoning),
-                    delta.tool_calls,
+                    None,
                 )
             } else {
                 return create_response(Err(format!("response is missing 'text' and 'message'")));
@@ -410,24 +410,40 @@ fn parse_response(raw_string: &str, original_request: Option<Arc<String>>, delta
             let mut tool_calls = Vec::new();
             if let Some(raw_tool_calls) = raw_tool_calls {
                 for raw_tool_call in raw_tool_calls {
-                    match &*raw_tool_call.kind {
+                    let Some(kind) = raw_tool_call.kind.as_ref() else {
+                        return create_response(Err(format!("malformed tool call found: 'type' not found")));
+                    };
+
+                    let Some(id) = raw_tool_call.id.as_ref() else {
+                        return create_response(Err(format!("malformed tool call found: 'id' not found")));
+                    };
+
+                    match kind.as_str() {
                         "function" => {
                             let Some(ref raw_function) = raw_tool_call.function else {
                                 return create_response(Err(format!("malformed tool call: has 'function' type but no 'function' field")));
                             };
 
-                            let args: serde_json::Value = match serde_json::from_str(&raw_function.arguments) {
+                            let Some(args) = raw_function.arguments.as_ref() else {
+                                return create_response(Err(format!("malformed tool call found: 'arguments' not found")));
+                            };
+
+                            let args: serde_json::Value = match serde_json::from_str(&args) {
                                 Ok(arguments) => arguments,
                                 Err(_) => {
                                     return create_response(Err(format!("malformed tool call found: failed to parse 'arguments'")));
                                 }
                             };
 
+                            let Some(name) = raw_function.name.as_ref() else {
+                                return create_response(Err(format!("malformed tool call found: 'name' not found")));
+                            };
+
                             tool_calls.push(ToolCallRequest {
                                 raw: raw_tool_call.clone(),
-                                id: raw_tool_call.id,
+                                id: id.to_owned(),
                                 kind: ToolCallRequestKind::Function {
-                                    name: raw_function.name.clone(),
+                                    name: name.to_owned(),
                                     args,
                                 },
                             });
@@ -1134,12 +1150,26 @@ fn test_parse_response_error_01() {
 }
 
 #[derive(Default)]
-pub struct DeltaState {
+struct DeltaToolCall {
+    function_name: Option<String>,
+    function_arguments: Option<String>,
     object: serde_json::Map<String, serde_json::Value>,
-    choice: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Default)]
+struct DeltaChoice {
     role: Option<String>,
     content: Option<String>,
     reasoning: Option<String>,
+    object: serde_json::Map<String, serde_json::Value>,
+
+    tool_calls: BTreeMap<u64, DeltaToolCall>,
+}
+
+#[derive(Default)]
+pub struct DeltaState {
+    object: serde_json::Map<String, serde_json::Value>,
+    choices: BTreeMap<u64, DeltaChoice>,
 }
 
 impl DeltaState {
@@ -1154,42 +1184,120 @@ impl DeltaState {
                     return Err("choices is not an array".into());
                 };
 
-                if choices.len() != 1 {
-                    return Err("choices has unexpected length".into());
-                }
+                for choice in choices {
+                    let serde_json::Value::Object(choice) = &choice else {
+                        return Err("choice is not an object".into());
+                    };
 
-                let serde_json::Value::Object(choice) = &choices[0] else {
-                    return Err("choices is not an object".into());
-                };
+                    let Some(index) = choice.get("index") else {
+                        return Err("choice object doesn't contain an 'index'".into());
+                    };
 
-                if let Some(delta) = choice.get("delta").and_then(|delta| delta.as_object()) {
-                    if let Some(role) = delta.get("role").and_then(|role| role.as_str()) {
-                        self.role = Some(role.to_owned());
+                    let serde_json::Value::Number(index) = index else {
+                        return Err("choice object contains an 'index' which isn't a number".into());
+                    };
+
+                    let Some(index) = index.as_u64() else {
+                        return Err("choice object contains an 'index' which is not castable to u64".into());
+                    };
+
+                    let choice_state = self.choices.entry(index).or_insert_with(DeltaChoice::default);
+
+                    if let Some(delta) = choice.get("delta").and_then(|delta| delta.as_object()) {
+                        if let Some(role) = delta.get("role").and_then(|role| role.as_str()) {
+                            choice_state.role = Some(role.to_owned());
+                        }
+
+                        if let Some(s) = delta.get("content").and_then(|s| s.as_str()) {
+                            choice_state.content.get_or_insert_default().push_str(&s);
+                        }
+
+                        if let Some(s) = delta
+                            .get("reasoning")
+                            .and_then(|s| s.as_str())
+                            .or_else(|| delta.get("reasoning_content").and_then(|s| s.as_str()))
+                        {
+                            choice_state.reasoning.get_or_insert_default().push_str(&s);
+                        }
+
+                        if let Some(tool_calls) = delta.get("tool_calls") {
+                            let serde_json::Value::Array(tool_calls) = tool_calls else {
+                                return Err("choice object contains a 'tool_calls' which is not an array".into());
+                            };
+
+                            for tool_call in tool_calls {
+                                let serde_json::Value::Object(tool_call) = &tool_call else {
+                                    return Err("tool call is not an object".into());
+                                };
+
+                                let Some(index) = tool_call.get("index") else {
+                                    return Err("tool call object doesn't contain an 'index'".into());
+                                };
+
+                                let serde_json::Value::Number(index) = index else {
+                                    return Err("tool call object contains an 'index' which isn't a number".into());
+                                };
+
+                                let Some(index) = index.as_u64() else {
+                                    return Err("tool call object contains an 'index' which is not castable to u64".into());
+                                };
+
+                                let tool_call_state = choice_state.tool_calls.entry(index).or_insert_with(DeltaToolCall::default);
+                                if let Some(function) = tool_call.get("function") {
+                                    let Some(function) = function.as_object() else {
+                                        return Err("tool call 'function' is not an object".into());
+                                    };
+
+                                    if let Some(name) = function.get("name") {
+                                        if !name.is_null() {
+                                            let Some(name) = name.as_str() else {
+                                                return Err("tool call 'function.name' is not a string".into());
+                                            };
+
+                                            tool_call_state.function_name.get_or_insert_default().push_str(&name);
+                                        }
+                                    }
+
+                                    if let Some(arguments) = function.get("arguments") {
+                                        if !arguments.is_null() {
+                                            let Some(arguments) = arguments.as_str() else {
+                                                return Err("tool call 'function.arguments' is not a string".into());
+                                            };
+
+                                            tool_call_state.function_arguments.get_or_insert_default().push_str(&arguments);
+                                        }
+                                    }
+                                } else {
+                                    if let Some(kind) = tool_call.get("type").and_then(|kind| kind.as_str()) {
+                                        return Err(format!("unsupported tool call type: '{kind}'"));
+                                    } else {
+                                        return Err("unsupported tool call type".into());
+                                    }
+                                }
+
+                                for (subkey, subvalue) in tool_call {
+                                    if subkey == "function" {
+                                        continue;
+                                    }
+
+                                    tool_call_state.object.insert(subkey.into(), subvalue.clone());
+                                }
+                            }
+                        }
                     }
 
-                    if let Some(s) = delta.get("content").and_then(|s| s.as_str()) {
-                        self.content.get_or_insert_default().push_str(&s);
-                    }
+                    for (subkey, subvalue) in choice {
+                        if subkey == "delta" || (subvalue.is_null() && choice_state.object.contains_key(&*subkey)) {
+                            continue;
+                        }
 
-                    if let Some(s) = delta
-                        .get("reasoning")
-                        .and_then(|s| s.as_str())
-                        .or_else(|| delta.get("reasoning_content").and_then(|s| s.as_str()))
-                    {
-                        self.reasoning.get_or_insert_default().push_str(&s);
+                        choice_state.object.insert(subkey.into(), subvalue.clone());
                     }
-                }
-
-                for (subkey, subvalue) in choice {
-                    if subkey == "delta" || (subvalue.is_null() && self.choice.contains_key(&*subkey)) {
-                        continue;
-                    }
-
-                    self.choice.insert(subkey.into(), subvalue.clone());
                 }
 
                 continue;
             }
+
             self.object.insert(key.clone(), value.clone());
         }
 
@@ -1197,27 +1305,71 @@ impl DeltaState {
     }
 
     pub fn finalize(mut self) -> Result<serde_json::Value, String> {
-        let Some(role) = self.role else {
-            return Err("missing 'role'".into());
-        };
+        let mut choices = Vec::new();
+        for mut choice in self.choices.into_values() {
+            let Some(role) = choice.role else {
+                return Err("missing 'role'".into());
+            };
 
-        let Some(content) = self.content else {
-            return Err("missing 'content'".into());
-        };
+            let Some(content) = choice.content else {
+                return Err("missing 'content'".into());
+            };
 
-        let mut message = serde_json::json! {{
-            "role": role,
-            "content": content,
-            "refusal": null,
-            "reasoning": null,
-        }};
+            let mut message = serde_json::json! {{
+                "role": role,
+                "content": content,
+                "refusal": null,
+                "reasoning": null,
+            }};
 
-        if let Some(reasoning) = self.reasoning {
-            message.as_object_mut().unwrap().insert("reasoning".into(), reasoning.into());
+            if let Some(reasoning) = choice.reasoning {
+                message.as_object_mut().unwrap().insert("reasoning".into(), reasoning.into());
+            }
+
+            if !choice.tool_calls.is_empty() {
+                let mut tool_calls = Vec::new();
+                for mut tool_call in choice.tool_calls.into_values() {
+                    if tool_call.function_name.is_some() || tool_call.function_arguments.is_some() {
+                        if !tool_call.object.contains_key("function") {
+                            tool_call
+                                .object
+                                .insert("function".into(), serde_json::Value::Object(Default::default()));
+                        } else if tool_call.object.get("function").unwrap().as_object().is_none() {
+                            return Err("tool call 'function' is not an object".into());
+                        }
+                    }
+
+                    if let Some(function_name) = tool_call.function_name {
+                        tool_call
+                            .object
+                            .get_mut("function")
+                            .unwrap()
+                            .as_object_mut()
+                            .unwrap()
+                            .insert("name".into(), function_name.into());
+                    }
+
+                    if let Some(function_arguments) = tool_call.function_arguments {
+                        tool_call
+                            .object
+                            .get_mut("function")
+                            .unwrap()
+                            .as_object_mut()
+                            .unwrap()
+                            .insert("arguments".into(), function_arguments.into());
+                    }
+
+                    tool_calls.push(tool_call.object);
+                }
+
+                message.as_object_mut().unwrap().insert("tool_calls".into(), tool_calls.into());
+            }
+
+            choice.object.insert("message".into(), message);
+            choices.push(choice.object);
         }
 
-        self.choice.insert("message".into(), message);
-        self.object.insert("choices".into(), serde_json::json! { [self.choice] });
+        self.object.insert("choices".into(), choices.into());
         self.object.insert("object".into(), "chat.completion".into());
         Ok(serde_json::Value::Object(self.object))
     }
@@ -1298,4 +1450,59 @@ fn test_reconstruct_reply_from_streaming_local() {
     let streaming_data = include_str!("test-data/01-local-streaming.jsonl");
     let non_streaming_data = include_str!("test-data/01-local-non-streaming.json");
     test_streaming_reconstruction(streaming_data, non_streaming_data, clean_local_response_to_match_streaming);
+}
+
+#[test]
+fn test_streaming_tool_call() {
+    const EXPECTED_RESPONSE: &'static str = r#"
+{
+  "id": "chatcmpl-aa2ce11d16105ca0",
+  "object": "chat.completion",
+  "created": 1769351762,
+  "model": "gpt-oss-120b",
+  "prompt_token_ids": null,
+  "usage": {
+    "prompt_tokens": 9713,
+    "total_tokens": 9826,
+    "completion_tokens": 113
+  },
+  "choices": [
+    {
+      "index": 0,
+      "logprobs": null,
+      "finish_reason": "tool_calls",
+      "token_ids": null,
+      "stop_reason": 200012,
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "refusal": null,
+        "reasoning": "The user asks to list files in current directory. We need to use Bash tool to run ls (or we could use Glob). Since they want list files, easiest is Bash ls.\n\nWe'll run command `ls -1` maybe just `ls`. Use bash tool.",
+        "tool_calls": [
+          {
+            "id": "chatcmpl-tool-a04db918809b96ad",
+            "type": "function",
+            "index": 0,
+            "function": {
+              "name": "bash",
+              "arguments": "{\n  \"command\": \"ls -1\",\n  \"description\": \"List files in current directory\",\n  \"timeout\": 120000,\n  \"workdir\": \"/tmp/dummy\"\n}"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
+"#;
+
+    let data = include_str!("test-data/02-local-streaming-tool-call.jsonl");
+    let mut state = DeltaState::default();
+    for line in data.lines() {
+        let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+        state.apply(&value).unwrap();
+    }
+
+    let response = state.finalize().unwrap();
+    let response = serde_json::to_string_pretty(&response).unwrap();
+    assert_eq!(EXPECTED_RESPONSE.trim(), response.trim());
 }
