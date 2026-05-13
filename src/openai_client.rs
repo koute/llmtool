@@ -631,6 +631,9 @@ pub enum ArgKind {
     Bool,
     String,
     Number,
+    Array(Box<ArgKind>),
+    Object(BTreeMap<String, Argument>),
+    Enum(Vec<String>),
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -977,42 +980,49 @@ impl Request {
                 }
 
                 for tool in tools {
+                    fn emit_ty(obj: &mut serde_json::Map<String, serde_json::Value>, kind: ArgKind) {
+                        let kind = match kind {
+                            ArgKind::Bool => "boolean",
+                            ArgKind::String => "string",
+                            ArgKind::Enum(options) => {
+                                obj.insert("enum".into(), options.into());
+                                "string"
+                            }
+                            ArgKind::Number => "number",
+                            ArgKind::Array(subkind) => {
+                                let mut subobj = serde_json::Map::new();
+                                emit_ty(&mut subobj, *subkind);
+                                obj.insert("items".into(), subobj.into());
+                                "array"
+                            }
+                            ArgKind::Object(properties) => {
+                                let mut required: Vec<String> = Vec::new();
+                                let mut props = serde_json::Map::new();
+                                for (subkey, subarg) in properties {
+                                    let mut subobj = serde_json::Map::new();
+                                    emit_ty(&mut subobj, subarg.kind);
+                                    subobj.insert("description".into(), subarg.description.into());
+                                    if subarg.is_required {
+                                        required.push(subkey.clone().into());
+                                    }
+                                    props.insert(subkey, serde_json::Value::Object(subobj));
+                                }
+                                obj.insert("properties".into(), props.into());
+                                obj.insert("required".into(), required.into());
+                                obj.insert("additionalProperties".into(), false.into());
+                                "object"
+                            }
+                        };
+
+                        obj.insert("type".into(), kind.into());
+                    }
+
                     match tool {
                         ToolDef::Function { name, description, args } => {
-                            let mut required: Vec<String> = Vec::new();
-                            let mut raw_args = serde_json::Map::new();
-                            for (key, arg) in args {
-                                let kind;
-                                match arg.kind {
-                                    ArgKind::Bool => {
-                                        kind = "boolean";
-                                    }
-                                    ArgKind::String => {
-                                        kind = "string";
-                                    }
-                                    ArgKind::Number => {
-                                        kind = "number";
-                                    }
-                                }
-
-                                let def = serde_json::json!({
-                                    "description": arg.description,
-                                    "type": kind
-                                });
-
-                                raw_args.insert(key.into(), def);
-                                if arg.is_required {
-                                    required.push(key.into());
-                                }
-                            }
-
-                            let args_schema = serde_json::json!({
-                                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                                "type": "object",
-                                "properties": serde_json::Value::Object(raw_args),
-                                "required": required,
-                                "additionalProperties": false,
-                            });
+                            let mut args_schema = serde_json::Map::new();
+                            args_schema.insert("$schema".into(), "https://json-schema.org/draft/2020-12/schema".into());
+                            emit_ty(&mut args_schema, ArgKind::Object(args.clone()));
+                            let args_schema = args_schema.into();
 
                             raw_request.tools.push(RawToolDef {
                                 kind: "function".into(),
