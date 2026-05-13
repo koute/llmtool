@@ -180,7 +180,7 @@ pub async fn main_single_request(
                 }
             }
 
-            if !response.text.is_empty() {
+            if !response.content.is_empty() {
                 if is_thinking && !hide_thinking {
                     is_thinking = false;
                     if out.write_all("</think>\n\n".as_bytes()).is_err() {
@@ -188,7 +188,7 @@ pub async fn main_single_request(
                     };
                 }
 
-                if out.write_all(response.text.as_bytes()).is_err() {
+                if out.write_all(response.content.as_bytes()).is_err() {
                     return Ok(());
                 };
             }
@@ -223,7 +223,7 @@ pub async fn main_single_request(
             match request.kind {
                 openai_client::RequestKind::Completion(ref request) => {
                     let _ = stdout.write_all(&request.prompt.as_bytes());
-                    let _ = stdout.write_all(&response.text.as_bytes());
+                    let _ = stdout.write_all(&response.content.as_bytes());
                 }
                 openai_client::RequestKind::Chat(..) => {
                     if !hide_thinking {
@@ -232,11 +232,11 @@ pub async fn main_single_request(
                         }
                     }
 
-                    let _ = stdout.write_all(&response.text.as_bytes());
+                    let _ = stdout.write_all(&response.content.as_bytes());
                 }
             }
         }
-        if is_terminal && !response.text.ends_with("\n") {
+        if is_terminal && !response.content.ends_with("\n") {
             let _ = stdout.write_all("\n".as_bytes());
         }
         let _ = stdout.flush();

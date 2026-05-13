@@ -89,14 +89,14 @@ pub async fn main_sanity_check(
             let _ = out.write_all(reasoning_content.as_bytes());
         }
 
-        if !response.text.is_empty() {
+        if !response.content.is_empty() {
             if is_thinking {
                 let _ = out.write_all(b"</think>");
                 is_thinking = false;
             }
 
-            let _ = out.write_all(response.text.as_bytes());
-            output.push_str(&response.text);
+            let _ = out.write_all(response.content.as_bytes());
+            output.push_str(&response.content);
         }
 
         if out.flush().is_err() {

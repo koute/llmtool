@@ -385,9 +385,9 @@ pub enum ToolCallRequestKind {
 
 #[derive(Clone, Debug)]
 pub struct ResponseOk {
-    pub finish_reason: Option<FinishReason>,
-    pub text: String,
+    pub content: String,
     pub reasoning_content: Option<String>,
+    pub finish_reason: Option<FinishReason>,
     pub usage: Option<Usage>,
     pub model: String,
     pub kind: ResponseKind,
@@ -509,7 +509,7 @@ fn parse_response(raw_string: &str, original_request: Option<Arc<String>>, delta
 
             let response = ResponseOk {
                 finish_reason: choice.finish_reason,
-                text,
+                content: text,
                 reasoning_content: reasoning_content,
                 model: response.model,
                 usage: response.usage,

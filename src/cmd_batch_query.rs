@@ -317,7 +317,7 @@ pub async fn main_batch_query(
 
                     let now = time::OffsetDateTime::now_local().unwrap();
                     let entry = BatchOutputLine {
-                        response: &response.text,
+                        response: &response.content,
                         finish_reason: match response.finish_reason {
                             None => {
                                 let stderr = std::io::stderr();
