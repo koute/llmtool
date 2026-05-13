@@ -30,6 +30,9 @@ pub struct CommonArgs {
     pub temperature: Option<f32>,
 
     #[clap(long)]
+    pub top_p: Option<f32>,
+
+    #[clap(long)]
     pub frequency_penalty: Option<f32>,
 
     #[clap(long)]
@@ -232,6 +235,7 @@ impl CommonArgs {
             seed: self.seed,
             max_tokens: self.max_tokens,
             temperature: self.temperature,
+            top_p: self.top_p,
             frequency_penalty: self.frequency_penalty,
             presence_penalty: self.presence_penalty,
             repetition_penalty: self.repetition_penalty,
