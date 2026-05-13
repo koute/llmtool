@@ -90,6 +90,12 @@ pub struct CommonArgs {
 
     #[clap(long)]
     pub top_logprobs: Option<u32>,
+
+    #[clap(long)]
+    pub include_special_tokens: bool,
+
+    #[clap(long)]
+    pub include_stop_token: bool,
 }
 
 #[derive(Copy, Clone, clap::ValueEnum)]
@@ -286,6 +292,8 @@ impl CommonArgs {
             priority: self.niceness,
             logprobs: self.logprobs,
             top_logprobs: self.top_logprobs,
+            include_special_tokens: self.include_special_tokens,
+            include_stop_token: self.include_stop_token,
         })
     }
 

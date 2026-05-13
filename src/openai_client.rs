@@ -197,6 +197,11 @@ pub struct RawGenerationArgs {
     pub logprobs: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_logprobs: Option<u32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip_special_tokens: Option<bool>,
+    #[serde(skip_serializing_if = "is_false")]
+    pub include_stop_str_in_output: bool,
 }
 
 const TIMEOUT: core::time::Duration = core::time::Duration::from_secs(60 * 60);
@@ -564,6 +569,10 @@ pub struct GenerationArgs {
     pub logprobs: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_logprobs: Option<u32>,
+    #[serde(skip_serializing_if = "is_false")]
+    pub include_special_tokens: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub include_stop_token: bool,
 }
 
 impl RawGenerationArgs {
@@ -584,6 +593,12 @@ impl RawGenerationArgs {
         raw.priority = args.priority;
         raw.logprobs = args.logprobs;
         raw.top_logprobs = args.top_logprobs;
+        if args.include_special_tokens {
+            raw.skip_special_tokens = Some(false);
+        }
+        if args.include_stop_token {
+            raw.include_stop_str_in_output = true;
+        }
         if !endpoint.providers.is_empty() {
             raw.provider = Some(RawProvider {
                 order: endpoint.providers.clone(),
