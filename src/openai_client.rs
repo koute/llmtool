@@ -912,7 +912,11 @@ impl DeltaState {
                         self.content.get_or_insert_default().push_str(&s);
                     }
 
-                    if let Some(s) = delta.get("reasoning").and_then(|s| s.as_str()) {
+                    if let Some(s) = delta
+                        .get("reasoning")
+                        .and_then(|s| s.as_str())
+                        .or_else(|| delta.get("reasoning_content").and_then(|s| s.as_str()))
+                    {
                         self.reasoning.get_or_insert_default().push_str(&s);
                     }
                 }
