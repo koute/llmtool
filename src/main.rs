@@ -7,6 +7,7 @@ mod cache;
 mod cache_client;
 mod cmd_batch_query;
 mod cmd_cache_server;
+mod cmd_router;
 mod cmd_single_request;
 mod openai_client;
 mod utils;
@@ -102,6 +103,21 @@ enum IsEnabled {
     Off,
 }
 
+#[derive(Copy, Clone, clap::ValueEnum)]
+pub enum OnOff {
+    On,
+    Off,
+}
+
+impl From<OnOff> for bool {
+    fn from(on_off: OnOff) -> bool {
+        match on_off {
+            OnOff::On => true,
+            OnOff::Off => false,
+        }
+    }
+}
+
 #[derive(Copy, Clone, Default, clap::ValueEnum)]
 enum Thinking {
     #[default]
@@ -195,6 +211,8 @@ enum Args {
         #[clap(long)]
         cache_path: Option<PathBuf>,
     },
+    /// Starts an OpenAI-compatible HTTP proxy/router.
+    Router(crate::cmd_router::RouterArgs),
 }
 
 const DEFAULT_LOCAL_PORT: u32 = 9001;
@@ -364,6 +382,7 @@ fn main() {
         Args::CacheServer { host, port, cache_path } => {
             big_runtime().block_on(crate::cmd_cache_server::main_cache_server(&format!("{host}:{port}"), cache_path))
         }
+        Args::Router(args) => big_runtime().block_on(crate::cmd_router::main_proxy_server(args)),
     };
 
     if let Err(error) = error {

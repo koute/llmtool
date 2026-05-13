@@ -5,7 +5,7 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::{Mutex, RwLock};
 
-fn load_server_cache(blob: &[u8]) -> Result<HashMap<UniqueHash, Range<usize>>, String> {
+fn load_server_cache(request_key: &str, blob: &[u8]) -> Result<HashMap<UniqueHash, Range<usize>>, String> {
     let mut cache = HashMap::new();
     for (line, range) in LinesWithRange::new(blob) {
         if line.is_empty() {
@@ -21,7 +21,7 @@ fn load_server_cache(blob: &[u8]) -> Result<HashMap<UniqueHash, Range<usize>>, S
             return Err("cache entry is not an object".to_string());
         };
 
-        let Some(raw_request) = obj.get("request") else {
+        let Some(raw_request) = obj.get(request_key) else {
             return Err("cache entry missing raw_request".to_string());
         };
 
@@ -55,15 +55,17 @@ pub struct Cache {
     map_cold: RwLock<HashMap<UniqueHash, Range<usize>>>,
     map_hot: RwLock<HashMap<UniqueHash, serde_json::Value>>,
     fp: Option<Mutex<std::io::BufWriter<std::fs::File>>>,
+    request_key: String,
 }
 
 impl Cache {
-    pub fn new() -> Self {
+    pub fn new(request_key: String) -> Self {
         Cache {
             blob: None,
             map_cold: RwLock::new(HashMap::new()),
             map_hot: RwLock::new(HashMap::new()),
             fp: None,
+            request_key,
         }
     }
 
@@ -77,7 +79,7 @@ impl Cache {
                 output_needs_newline = true;
             }
 
-            let map_cold = load_server_cache(&blob)?;
+            let map_cold = load_server_cache(&self.request_key, &blob)?;
             eprintln!("INFO: Loaded cache: {} entries", map_cold.len());
 
             self.map_cold = RwLock::new(map_cold);
@@ -150,10 +152,11 @@ impl Cache {
 
         if write_to_file {
             if let Some(ref fp) = self.fp {
-                let entry = serde_json::json!({
-                    "request": key,
-                    "raw_response": value,
-                });
+                let mut entry = serde_json::Map::new();
+                entry.insert(self.request_key.clone(), key);
+                entry.insert("raw_response".into(), value);
+
+                let entry = serde_json::Value::Object(entry);
                 if let Ok(mut entry) = serde_json::to_string(&entry) {
                     entry.push('\n');
 

@@ -13,7 +13,7 @@ async fn main_cache_server_impl(
     address: &str,
     cache_path: Option<PathBuf>,
 ) -> Result<Pin<Box<dyn futures::Future<Output = ()> + Send + 'static>>, String> {
-    let mut cache = Cache::new();
+    let mut cache = Cache::new("request".into());
     let verbose = false;
     if let Some(ref cache_path) = cache_path {
         cache.acquire(cache_path)?;

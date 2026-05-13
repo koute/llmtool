@@ -178,6 +178,29 @@ pub struct ResponseError {
     pub param: Option<String>,
 }
 
+impl ResponseError {
+    pub fn new(code: u32, kind: Option<String>, message: String) -> Self {
+        Self {
+            code,
+            message,
+            kind,
+            param: None,
+        }
+    }
+
+    pub fn not_found() -> Self {
+        Self::new(404, Some("not_found_error".into()), "not found".into())
+    }
+
+    pub fn bad_request(message: String) -> Self {
+        Self::new(400, Some("bad_request".into()), message)
+    }
+
+    pub fn internal_server_error(message: String) -> Self {
+        Self::new(500, Some("internal_server_error".into()), message)
+    }
+}
+
 #[derive(Copy, Clone, PartialEq, Eq, serde::Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum FinishReason {
@@ -550,14 +573,14 @@ pub struct Request {
     pub kind: RequestKind,
 }
 
-enum StreamingChunk {
+pub enum StreamingChunk {
     Payload(String),
     Chunk(String),
     Finish,
     Error(String),
 }
 
-fn handle_streaming(client: reqwest::Response) -> Result<Pin<Box<dyn futures::Stream<Item = StreamingChunk>>>, String> {
+pub fn handle_streaming(client: reqwest::Response) -> Result<Pin<Box<dyn futures::Stream<Item = StreamingChunk> + Send>>, String> {
     struct State {
         buffer: Vec<u8>,
         client: reqwest::Response,
@@ -875,7 +898,7 @@ fn test_parse_response_error_01() {
 }
 
 #[derive(Default)]
-struct DeltaState {
+pub struct DeltaState {
     object: serde_json::Map<String, serde_json::Value>,
     choice: serde_json::Map<String, serde_json::Value>,
     role: Option<String>,
@@ -884,7 +907,7 @@ struct DeltaState {
 }
 
 impl DeltaState {
-    fn apply(&mut self, value: &serde_json::Value) -> Result<(), String> {
+    pub fn apply(&mut self, value: &serde_json::Value) -> Result<(), String> {
         let serde_json::Value::Object(map) = value else {
             return Err("value is not a map".into());
         };
@@ -937,7 +960,7 @@ impl DeltaState {
         Ok(())
     }
 
-    fn finalize(mut self) -> Result<serde_json::Value, String> {
+    pub fn finalize(mut self) -> Result<serde_json::Value, String> {
         let Some(role) = self.role else {
             return Err("missing 'role'".into());
         };

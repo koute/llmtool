@@ -14,7 +14,7 @@ path = "src/main.rs"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
 tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.13", features = ["json", "stream"] }
 futures = "0.3"
 ctrlc = "3"
 clap = { version = "4.5.34", features = ["derive"] }
@@ -25,3 +25,10 @@ tikv-jemallocator = "0.6.1"
 blake3 = "1.8.2"
 ahash = "0.8.12"
 time = { version = "0.3", features = ["formatting", "local-offset"] }
+hyper = { version = "1", features = ["http1", "http2", "client", "server"], default-features = false }
+hyper-util = "0.1"
+http = "1"
+bytes = "1"
+http-body = "1"
+http-body-util = "0.1"
+tokio-stream = "0.1"
