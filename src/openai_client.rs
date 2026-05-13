@@ -269,89 +269,69 @@ impl Response {
 fn parse_response(raw_string: &str, raw_request: Arc<String>) -> Response {
     let raw_value: Result<Value, _> = serde_json::from_str(raw_string);
     let raw = Some(raw_string.to_owned());
+    let create_response = |obj| Response {
+        obj,
+        raw,
+        original_request: Some(raw_request),
+    };
+
     let raw_value = match raw_value {
         Ok(raw_value) => raw_value,
         Err(error) => {
-            return Response {
-                obj: Err(format!("response is not valid JSON: {error}")),
-                raw,
-                original_request: Some(raw_request),
-            };
+            return create_response(Err(format!("response is not valid JSON: {error}")));
         }
     };
 
     let Some(value) = raw_value.as_object() else {
-        return Response {
-            obj: Err(format!("response is not an object")),
-            raw,
-            original_request: Some(raw_request),
-        };
+        return create_response(Err(format!("response is not an object")));
     };
 
     if let Some(error) = value.get("error") {
         let error: Result<ResponseError, _> = serde_json::from_value(error.clone());
-        return Response {
-            obj: match error {
-                Ok(error) => Ok(Err(error)),
-                Err(error) => Err(format!("failed to parse 'error': {error}")),
-            },
-            raw,
-            original_request: Some(raw_request),
-        };
+        return create_response(match error {
+            Ok(error) => Ok(Err(error)),
+            Err(error) => Err(format!("failed to parse 'error': {error}")),
+        });
     }
 
     let response: Result<RawResponseOk, _> = serde_json::from_value(raw_value.clone());
-    Response {
-        obj: match response {
-            Ok(response) => {
-                let Some(choice) = response.choices.into_iter().next() else {
-                    return Response {
-                        obj: Err(format!("response is missing choices")),
-                        raw,
-                        original_request: Some(raw_request),
-                    };
-                };
+    let obj = match response {
+        Ok(response) => {
+            let Some(choice) = response.choices.into_iter().next() else {
+                return create_response(Err(format!("response is missing choices")));
+            };
 
-                if let Some(error) = choice.error {
-                    return Response {
-                        obj: Err(format!("response returned an error: code {}: {}", error.code, error.message)),
-                        raw,
-                        original_request: Some(raw_request),
-                    };
-                }
-
-                let (text, reasoning_content) = if let Some(message) = choice.message {
-                    (
-                        message.content.unwrap_or(String::new()),
-                        message.reasoning_content.or(message.reasoning),
-                    )
-                } else if let Some(text) = choice.text {
-                    (text, None)
-                } else if let Some(delta) = choice.delta {
-                    (delta.content.unwrap_or(String::new()), delta.reasoning_content.or(delta.reasoning))
-                } else {
-                    return Response {
-                        obj: Err(format!("response is missing 'text' and 'message'")),
-                        raw,
-                        original_request: Some(raw_request),
-                    };
-                };
-
-                let response = ResponseOk {
-                    finish_reason: choice.finish_reason,
-                    text,
-                    reasoning_content: reasoning_content,
-                    model: response.model,
-                    usage: response.usage,
-                };
-
-                Ok(Ok(response))
+            if let Some(error) = choice.error {
+                return create_response(Err(format!("response returned an error: code {}: {}", error.code, error.message)));
             }
-            Err(error) => Err(format!("failed to parse response: {error}")),
-        },
-        raw,
-        original_request: Some(raw_request),
-    }
+
+            let (text, reasoning_content) = if let Some(message) = choice.message {
+                (
+                    message.content.unwrap_or(String::new()),
+                    message.reasoning_content.or(message.reasoning),
+                )
+            } else if let Some(text) = choice.text {
+                (text, None)
+            } else if let Some(delta) = choice.delta {
+                (delta.content.unwrap_or(String::new()), delta.reasoning_content.or(delta.reasoning))
+            } else {
+                return create_response(Err(format!("response is missing 'text' and 'message'")));
+            };
+
+            let response = ResponseOk {
+                finish_reason: choice.finish_reason,
+                text,
+                reasoning_content: reasoning_content,
+                model: response.model,
+                usage: response.usage,
+            };
+
+            Ok(Ok(response))
+        }
+        Err(error) => Err(format!("failed to parse response: {error}")),
+    };
+
+    create_response(obj)
 }
 
 #[derive(Clone, serde::Serialize)]
