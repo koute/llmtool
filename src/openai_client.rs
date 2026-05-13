@@ -233,7 +233,7 @@ impl ResponseError {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, serde::Deserialize, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum FinishReason {
     Length,
@@ -241,7 +241,7 @@ pub enum FinishReason {
     ToolCalls,
 }
 
-#[derive(Clone, serde::Deserialize, Debug)]
+#[derive(Clone, serde::Serialize, serde::Deserialize, Debug)]
 pub struct Usage {
     pub completion_tokens: u64,
     pub prompt_tokens: u64,
@@ -364,7 +364,7 @@ pub enum ToolChoice {
     AnyOf(Vec<String>),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct ToolCallRequest {
     pub id: String,
     pub kind: ToolCallRequestKind,
@@ -378,12 +378,13 @@ impl ToolCallRequest {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ToolCallRequestKind {
     Function { name: String, args: serde_json::Value },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct ResponseOk {
     pub content: String,
     pub reasoning_content: Option<String>,
@@ -400,7 +401,8 @@ impl ResponseOk {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ResponseKind {
     Normal,
     Streaming,
