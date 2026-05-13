@@ -151,6 +151,13 @@ enum DisplayThinking {
     Hide,
 }
 
+#[derive(Copy, Clone, Default, clap::ValueEnum)]
+enum MessageFormat {
+    #[default]
+    Text,
+    Json,
+}
+
 #[derive(clap::Args)]
 pub struct SingleRequestArgs {
     #[clap(long, short = 'v')]
@@ -179,6 +186,12 @@ enum Args {
         /// Whether to display thinking. (NOTE: This doesn't affect whether the model's thinking is enabled.)
         #[clap(long, default_value = "auto")]
         display_thinking: DisplayThinking,
+
+        #[clap(long, default_value = "text")]
+        input_message_format: MessageFormat,
+
+        #[clap(long, default_value = "text")]
+        output_message_format: MessageFormat,
 
         #[clap(flatten)]
         common_args: CommonArgs,
@@ -243,7 +256,7 @@ const DEFAULT_LOCAL_PORT: u32 = 9001;
 
 enum RequestKind {
     Completion,
-    Chat(ChatArgs, SchemaArgs),
+    Chat(ChatArgs, SchemaArgs, MessageFormat, MessageFormat),
 }
 
 impl CommonArgs {
@@ -378,6 +391,8 @@ fn main() {
         )),
         Args::Q {
             display_thinking,
+            input_message_format,
+            output_message_format,
             common_args,
             chat_args,
             schema_args,
@@ -386,7 +401,7 @@ fn main() {
         } => small_runtime().block_on(crate::cmd_single_request::main_single_request(
             common_args,
             query,
-            RequestKind::Chat(chat_args, schema_args),
+            RequestKind::Chat(chat_args, schema_args, input_message_format, output_message_format),
             display_thinking,
             single_request_args,
         )),

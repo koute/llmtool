@@ -3,7 +3,7 @@ use std::io::Write;
 
 use crate::openai_client;
 use crate::utils::{extract_response, prepare_chat_request_template, print_logs};
-use crate::{CommonArgs, DisplayThinking, IsEnabled, RequestKind, SingleRequestArgs};
+use crate::{CommonArgs, DisplayThinking, IsEnabled, MessageFormat, RequestKind, SingleRequestArgs};
 
 async fn cache_response(
     cache_address: &str,
@@ -42,7 +42,7 @@ pub async fn main_single_request(
 
     use std::io::IsTerminal;
     let is_terminal = std::io::stdout().is_terminal();
-    let streaming = match streaming {
+    let mut streaming = match streaming {
         IsEnabled::On => true,
         IsEnabled::Off => false,
         IsEnabled::Auto => is_terminal,
@@ -77,13 +77,38 @@ pub async fn main_single_request(
         common_args.niceness = Some(-1);
     }
 
+    let mut output_reply_as_json = false;
     let request = openai_client::Request {
         args: common_args.get_generation_args()?,
         kind: match kind {
             RequestKind::Completion => openai_client::RequestKind::Completion(openai_client::CompletionRequest { prompt }),
-            RequestKind::Chat(ref chat_args, ref schema_args) => {
+            RequestKind::Chat(ref chat_args, ref schema_args, input_message_format, output_message_format) => {
                 let mut req = prepare_chat_request_template(chat_args, schema_args)?;
-                req.messages.push(openai_client::Message::new("user".into(), prompt));
+                match input_message_format {
+                    MessageFormat::Text => {
+                        req.messages.push(openai_client::Message::new("user".into(), prompt));
+                    }
+                    MessageFormat::Json => {
+                        let prompt: Result<Vec<openai_client::Message>, _> = serde_json::from_str(&prompt);
+                        let prompt = match prompt {
+                            Ok(prompt) => prompt,
+                            Err(error) => {
+                                return Err(format!("failed to parse prompt: {error}"));
+                            }
+                        };
+
+                        req.messages = prompt;
+                    }
+                }
+
+                match output_message_format {
+                    MessageFormat::Text => {}
+                    MessageFormat::Json => {
+                        output_reply_as_json = true;
+                        streaming = false; // TODO: Make it work?
+                    }
+                }
+
                 openai_client::RequestKind::Chat(req)
             }
         },
@@ -226,13 +251,17 @@ pub async fn main_single_request(
                     let _ = stdout.write_all(&response.content.as_bytes());
                 }
                 openai_client::RequestKind::Chat(..) => {
-                    if !hide_thinking {
-                        if let Some(ref reasoning_content) = response.reasoning_content {
-                            let _ = writeln!(stdout, "<think>{}</think>\n", reasoning_content);
+                    if output_reply_as_json {
+                        let _ = stdout.write_all(&serde_json::to_string(&response).unwrap().as_bytes());
+                    } else {
+                        if !hide_thinking {
+                            if let Some(ref reasoning_content) = response.reasoning_content {
+                                let _ = writeln!(stdout, "<think>{}</think>\n", reasoning_content);
+                            }
                         }
-                    }
 
-                    let _ = stdout.write_all(&response.content.as_bytes());
+                        let _ = stdout.write_all(&response.content.as_bytes());
+                    }
                 }
             }
         }
