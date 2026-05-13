@@ -117,7 +117,23 @@ pub async fn main_single_request(
                                 }
 
                                 if let Some((w, h)) = resize {
-                                    img = img.resize_exact(w, h, image::imageops::FilterType::Lanczos3);
+                                    let mut dst_image = match img {
+                                        image::DynamicImage::ImageLuma8(_) => image::DynamicImage::new_luma8(w, h),
+                                        image::DynamicImage::ImageLumaA8(_) => image::DynamicImage::new_luma_a8(w, h),
+                                        image::DynamicImage::ImageRgb8(_) => image::DynamicImage::new_rgb8(w, h),
+                                        image::DynamicImage::ImageRgba8(_) => image::DynamicImage::new_rgba8(w, h),
+                                        image::DynamicImage::ImageLuma16(_) => image::DynamicImage::new_luma16(w, h),
+                                        image::DynamicImage::ImageLumaA16(_) => image::DynamicImage::new_luma_a16(w, h),
+                                        image::DynamicImage::ImageRgb16(_) => image::DynamicImage::new_rgb16(w, h),
+                                        image::DynamicImage::ImageRgba16(_) => image::DynamicImage::new_rgba16(w, h),
+                                        image::DynamicImage::ImageRgb32F(_) => image::DynamicImage::new_rgb32f(w, h),
+                                        image::DynamicImage::ImageRgba32F(_) => image::DynamicImage::new_rgba32f(w, h),
+                                        _ => return Err("unsupported pixel type for resizing".into()),
+                                    };
+                                    let mut resizer = fast_image_resize::Resizer::new();
+                                    resizer.resize(&img, &mut dst_image, None)
+                                        .map_err(|e| format!("failed to resize image: {e}"))?;
+                                    img = dst_image;
                                 }
 
                                 let mut buf = Vec::new();
