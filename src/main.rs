@@ -215,6 +215,18 @@ enum Args {
         #[clap(flatten)]
         single_request_args: SingleRequestArgs,
 
+        #[clap(long)]
+        image: Option<std::path::PathBuf>,
+
+        #[clap(long)]
+        resize: Option<String>,
+
+        #[clap(long, allow_hyphen_values = true)]
+        contrast: Option<f32>,
+
+        #[clap(long, allow_hyphen_values = true)]
+        saturation: Option<f32>,
+
         query: Vec<String>,
     },
     /// Sends a single completion query.
@@ -402,6 +414,10 @@ fn main() {
             RequestKind::Completion,
             DisplayThinking::Auto,
             single_request_args,
+            None,
+            None,
+            None,
+            None,
         )),
         Args::Q {
             display_thinking,
@@ -412,13 +428,41 @@ fn main() {
             schema_args,
             query,
             single_request_args,
-        } => small_runtime().block_on(crate::cmd_single_request::main_single_request(
-            common_args,
-            query,
-            RequestKind::Chat(chat_args, schema_args, input_message_format, output_message_format),
-            display_thinking,
-            single_request_args,
-        )),
+            image,
+            resize,
+            contrast,
+            saturation,
+        } => {
+            let resize = match resize {
+                Some(ref s) => {
+                    let Some((w, h)) = s.split_once('x') else {
+                        eprintln!("ERROR: invalid resize format, expected WIDTHxHEIGHT");
+                        std::process::exit(1);
+                    };
+                    let Ok(w) = w.parse::<u32>() else {
+                        eprintln!("ERROR: invalid resize width");
+                        std::process::exit(1);
+                    };
+                    let Ok(h) = h.parse::<u32>() else {
+                        eprintln!("ERROR: invalid resize height");
+                        std::process::exit(1);
+                    };
+                    Some((w, h))
+                }
+                None => None,
+            };
+            small_runtime().block_on(crate::cmd_single_request::main_single_request(
+                common_args,
+                query,
+                RequestKind::Chat(chat_args, schema_args, input_message_format, output_message_format),
+                display_thinking,
+                single_request_args,
+                image,
+                resize,
+                contrast,
+                saturation,
+            ))
+        }
         Args::BatchQuery {
             chat_args,
             schema_args,

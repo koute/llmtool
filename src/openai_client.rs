@@ -639,10 +639,41 @@ pub struct CompletionRequest {
     pub prompt: String,
 }
 
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum MessageContent {
+    Text(String),
+    Array(Vec<MessageContentPart>),
+}
+
+impl Default for MessageContent {
+    fn default() -> Self {
+        MessageContent::Text(String::new())
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, serde::Serialize, serde::Deserialize, Default)]
+pub struct MessageContentPart {
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_url: Option<ImageUrl>,
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, serde::Serialize, serde::Deserialize, Default)]
+pub struct ImageUrl {
+    pub url: String,
+}
+
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, serde::Serialize, serde::Deserialize, Default)]
 pub struct Message {
     pub role: String,
     pub content: String,
+
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub images: Vec<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_content: Option<String>,
@@ -659,6 +690,7 @@ impl Message {
         Self {
             role,
             content,
+            images: Vec::new(),
             reasoning_content: None,
             tool_calls: None,
             tool_call_id: None,
@@ -669,7 +701,7 @@ impl Message {
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, serde::Serialize, serde::Deserialize, Default)]
 pub struct RawMessageOut {
     pub role: String,
-    pub content: String,
+    pub content: MessageContent,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<String>,
@@ -991,7 +1023,26 @@ impl Request {
                     .iter()
                     .map(|message| RawMessageOut {
                         role: message.role.clone(),
-                        content: message.content.clone(),
+                        content: if message.images.is_empty() {
+                            MessageContent::Text(message.content.clone())
+                        } else {
+                            let mut parts = Vec::new();
+                            if !message.content.is_empty() {
+                                parts.push(MessageContentPart {
+                                    kind: "text".into(),
+                                    text: Some(message.content.clone()),
+                                    image_url: None,
+                                });
+                            }
+                            for image in &message.images {
+                                parts.push(MessageContentPart {
+                                    kind: "image_url".into(),
+                                    text: None,
+                                    image_url: Some(ImageUrl { url: image.clone() }),
+                                });
+                            }
+                            MessageContent::Array(parts)
+                        },
                         reasoning: message.reasoning_content.clone(),
                         reasoning_content: message.reasoning_content.clone(),
                         tool_calls: message.tool_calls.clone(),

@@ -536,6 +536,7 @@ impl Mutex<Agent> {
                 AnyMessageKind::Assistant(message) => messages.push(openai_client::Message {
                     role: "assistant".into(),
                     content: message.content.clone(),
+                    images: Vec::new(),
                     reasoning_content: message.reasoning.clone(),
                     tool_calls: if message.tool_calls.is_empty() {
                         None
@@ -548,6 +549,7 @@ impl Mutex<Agent> {
                     messages.push(openai_client::Message {
                         role: "tool".into(),
                         content: result.to_string(),
+                        images: Vec::new(),
                         reasoning_content: None,
                         tool_calls: Default::default(),
                         tool_call_id: Some(id.clone()),

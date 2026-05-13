@@ -4,6 +4,8 @@ use std::io::Write;
 use crate::openai_client;
 use crate::utils::{extract_response, prepare_chat_request_template, print_logs};
 use crate::{CommonArgs, DisplayThinking, IsEnabled, MessageFormat, RequestKind, SingleRequestArgs};
+use std::path::PathBuf;
+use base64::Engine;
 
 async fn cache_response(
     cache_address: &str,
@@ -30,6 +32,10 @@ pub async fn main_single_request(
     kind: RequestKind,
     display_thinking: DisplayThinking,
     single_request_args: SingleRequestArgs,
+    image: Option<PathBuf>,
+    resize: Option<(u32, u32)>,
+    contrast: Option<f32>,
+    saturation: Option<f32>,
 ) -> Result<(), String> {
     let SingleRequestArgs {
         streaming,
@@ -87,6 +93,56 @@ pub async fn main_single_request(
                 match input_message_format {
                     MessageFormat::Text => {
                         req.messages.push(openai_client::Message::new("user".into(), prompt));
+                        if let Some(image_path) = image {
+                            let image_data = std::fs::read(&image_path)
+                                .map_err(|e| format!("failed to read image '{}': {e}", image_path.display()))?;
+                            let (image_data, mime) = if resize.is_some() || contrast.is_some() || saturation.is_some() {
+                                let mut img = image::load_from_memory(&image_data)
+                                    .map_err(|e| format!("failed to decode image: {e}"))?;
+
+                                if let Some(contrast) = contrast {
+                                    image::imageops::colorops::contrast_in_place(&mut img, contrast);
+                                }
+
+                                if let Some(saturation) = saturation {
+                                    let mut rgb = img.into_rgb8();
+                                    for px in rgb.pixels_mut() {
+                                        let [r, g, b] = px.0;
+                                        let (h, s, l) = rgb_to_hsl(r, g, b);
+                                        let s = (s * (1.0 + saturation)).clamp(0.0, 1.0);
+                                        let (r, g, b) = hsl_to_rgb(h, s, l);
+                                        px.0 = [r, g, b];
+                                    }
+                                    img = rgb.into();
+                                }
+
+                                if let Some((w, h)) = resize {
+                                    img = img.resize_exact(w, h, image::imageops::FilterType::Lanczos3);
+                                }
+
+                                let mut buf = Vec::new();
+                                let is_png = image_path.extension().and_then(|e| e.to_str()) == Some("png");
+                                let format = if is_png { image::ImageFormat::Png } else { image::ImageFormat::Jpeg };
+                                let mime = if is_png { "image/png" } else { "image/jpeg" };
+                                img.write_to(&mut std::io::Cursor::new(&mut buf), format)
+                                    .map_err(|e| format!("failed to encode image: {e}"))?;
+                                (buf, mime)
+                            } else {
+                                let mime = match image_path.extension().and_then(|e| e.to_str()) {
+                                    Some("png") => "image/png",
+                                    Some("jpg") | Some("jpeg") => "image/jpeg",
+                                    Some("webp") => "image/webp",
+                                    Some("gif") => "image/gif",
+                                    _ => return Err(format!("unsupported image format: {}", image_path.display())),
+                                };
+                                (image_data, mime)
+                            };
+                            let b64 = base64::engine::general_purpose::STANDARD.encode(&image_data);
+                            let data_url = format!("data:{mime};base64,{b64}");
+                            if let Some(last) = req.messages.last_mut() {
+                                last.images.push(data_url);
+                            }
+                        }
                     }
                     MessageFormat::Json => {
                         let prompt: Result<Vec<openai_client::Message>, _> = serde_json::from_str(&prompt);
@@ -272,3 +328,80 @@ pub async fn main_single_request(
     }
     Ok(())
 }
+
+fn rgb_to_hsl(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
+    let r = r as f32 / 255.0;
+    let g = g as f32 / 255.0;
+    let b = b as f32 / 255.0;
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let l = (max + min) / 2.0;
+
+    if max == min {
+        return (0.0, 0.0, l);
+    }
+
+    let d = max - min;
+    let s = if l > 0.5 {
+        d / (2.0 - max - min)
+    } else {
+        d / (max + min)
+    };
+
+    let mut h = if max == r {
+        (g - b) / d + if g < b { 6.0 } else { 0.0 }
+    } else if max == g {
+        (b - r) / d + 2.0
+    } else {
+        (r - g) / d + 4.0
+    };
+    h /= 6.0;
+
+    (h, s, l)
+}
+
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (u8, u8, u8) {
+    let (r, g, b);
+
+    if s == 0.0 {
+        r = l;
+        g = l;
+        b = l;
+    } else {
+        let q = if l < 0.5 {
+            l * (1.0 + s)
+        } else {
+            l + s - l * s
+        };
+        let p = 2.0 * l - q;
+        r = hue_to_rgb(p, q, h + 1.0 / 3.0);
+        g = hue_to_rgb(p, q, h);
+        b = hue_to_rgb(p, q, h - 1.0 / 3.0);
+    }
+
+    (
+        (r * 255.0).round() as u8,
+        (g * 255.0).round() as u8,
+        (b * 255.0).round() as u8,
+    )
+}
+
+fn hue_to_rgb(p: f32, q: f32, mut t: f32) -> f32 {
+    if t < 0.0 {
+        t += 1.0;
+    }
+    if t > 1.0 {
+        t -= 1.0;
+    }
+    if t < 1.0 / 6.0 {
+        return p + (q - p) * 6.0 * t;
+    }
+    if t < 1.0 / 2.0 {
+        return q;
+    }
+    if t < 2.0 / 3.0 {
+        return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
+    }
+    p
+}
+
