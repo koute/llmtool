@@ -20,6 +20,11 @@ pub fn prepare_chat_request_template(chat_args: &ChatArgs, schema_args: &SchemaA
 
     let mut messages = Vec::new();
     if let Some(content) = system_prompt {
+        let content = if content.starts_with("@") {
+            std::fs::read_to_string(&content[1..]).map_err(|error| format!("failed to open system prompt '{}': {error}", &content[1..]))?
+        } else {
+            content.to_owned()
+        };
         messages.push(openai_client::Message::new("system".into(), content.to_owned()));
     }
 
