@@ -50,6 +50,10 @@ impl Endpoint {
         self.url.contains("/127.0.0.1:") || self.url.contains("/localhost:")
     }
 
+    pub fn is_openrouter(&self) -> bool {
+        self.url == "https://openrouter.ai/api"
+    }
+
     fn completion_url(&self) -> String {
         format!("{}/v1/completions", self.url)
     }
@@ -98,6 +102,20 @@ pub struct RawResponseFormat {
 #[derive(Clone, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize, Default)]
 pub struct RawStructuredOutputs {
     pub choice: Option<Vec<String>>,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize, Default)]
+pub struct RawReasoning {
+    // Can be one or the other.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exclude: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize, Default)]
@@ -164,6 +182,9 @@ pub struct RawGenerationArgs {
     pub response_format: Option<RawResponseFormat>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub structured_outputs: Option<RawStructuredOutputs>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<RawReasoning>,
 
     #[serde(skip_serializing_if = "is_false")]
     pub logprobs: bool,
@@ -929,6 +950,11 @@ impl Request {
                     })
                     .collect();
 
+                if endpoint.is_openrouter() {
+                    // Force it to send us the reasoning traces, if any.
+                    raw_request.reasoning.get_or_insert_default();
+                }
+
                 let thinking = match thinking {
                     Thinking::Auto => None,
                     Thinking::Enable => Some(true),
@@ -949,6 +975,7 @@ impl Request {
                             map
                         }),
                     );
+                    raw_request.reasoning.get_or_insert_default().enabled = Some(thinking);
                 }
 
                 if thinking.unwrap_or(true) && raw_request.messages.iter().any(|message| message.reasoning.is_some()) {
@@ -967,6 +994,15 @@ impl Request {
                         unreachable!()
                     };
                     kwargs.insert("reasoning_effort".into(), reasoning_effort.clone().into());
+                    if reasoning_effort.chars().all(|ch| ch.is_numeric()) {
+                        let Ok(max_tokens) = reasoning_effort.parse() else {
+                            return Err("cannot parse 'reasoning_effort'".into());
+                        };
+
+                        raw_request.reasoning.get_or_insert_default().max_tokens = Some(max_tokens);
+                    } else {
+                        raw_request.reasoning.get_or_insert_default().effort = Some(reasoning_effort.clone());
+                    }
                 }
 
                 fn schema_preset(schema: &str) -> Option<RawResponseFormat> {
