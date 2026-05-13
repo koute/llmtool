@@ -3,17 +3,21 @@ use std::path::Path;
 
 use crate::openai_client;
 use crate::openai_client::Endpoint;
-use crate::{ChatArgs, OutputFormat};
+use crate::{ChatArgs, OutputFormat, SchemaArgs};
 
-pub fn prepare_chat_request_template(chat_args: &ChatArgs) -> Result<openai_client::ChatRequest, String> {
+pub fn prepare_chat_request_template(chat_args: &ChatArgs, schema_args: &SchemaArgs) -> Result<openai_client::ChatRequest, String> {
     let ChatArgs {
         ref system_prompt,
         disable_thinking,
         ref reasoning_effort,
+    } = *chat_args;
+
+    let SchemaArgs {
         ref output_format_choice,
         output_format,
         ref json_schema,
-    } = *chat_args;
+    } = *schema_args;
+
     let mut messages = Vec::new();
     if let Some(content) = system_prompt {
         messages.push(openai_client::Message::new("system".into(), content.to_owned()));

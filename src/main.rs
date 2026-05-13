@@ -95,7 +95,7 @@ enum OutputFormat {
     JsonArrayOfArrays,
 }
 
-#[derive(clap::Args)]
+#[derive(Default, clap::Args)]
 pub struct ChatArgs {
     #[clap(long)]
     disable_thinking: bool,
@@ -105,7 +105,10 @@ pub struct ChatArgs {
 
     #[clap(long, short = 's')]
     system_prompt: Option<String>,
+}
 
+#[derive(Default, clap::Args)]
+pub struct SchemaArgs {
     #[clap(long)]
     output_format_choice: Option<String>,
 
@@ -183,6 +186,9 @@ enum Args {
         chat_args: ChatArgs,
 
         #[clap(flatten)]
+        schema_args: SchemaArgs,
+
+        #[clap(flatten)]
         single_request_args: SingleRequestArgs,
 
         query: Vec<String>,
@@ -204,6 +210,9 @@ enum Args {
 
         #[clap(flatten)]
         chat_args: ChatArgs,
+
+        #[clap(flatten)]
+        schema_args: SchemaArgs,
 
         #[clap(long, short = 'i')]
         input: PathBuf,
@@ -244,7 +253,7 @@ const DEFAULT_LOCAL_PORT: u32 = 9001;
 
 enum RequestKind {
     Completion,
-    Chat(ChatArgs),
+    Chat(ChatArgs, SchemaArgs),
 }
 
 impl CommonArgs {
@@ -380,18 +389,20 @@ fn main() {
             thinking,
             common_args,
             chat_args,
+            schema_args,
             query,
             single_request_args,
         } => small_runtime().block_on(crate::cmd_single_request::main_single_request(
             common_args,
             query,
-            RequestKind::Chat(chat_args),
+            RequestKind::Chat(chat_args, schema_args),
             thinking,
             single_request_args,
         )),
         Args::BatchQuery {
             common_args,
             chat_args,
+            schema_args,
             input,
             output,
             save_raw,
@@ -400,6 +411,7 @@ fn main() {
         } => big_runtime().block_on(crate::cmd_batch_query::main_batch_query(
             common_args,
             chat_args,
+            schema_args,
             input,
             output,
             save_raw,

@@ -12,7 +12,7 @@ use crate::utils::{
     Lines, UniqueHash, extract_response, get_thread_count, hash_value, mmap_read, prepare_chat_request_template, print_logs,
     split_blob_approximate,
 };
-use crate::{ChatArgs, CommonArgs};
+use crate::{ChatArgs, CommonArgs, SchemaArgs};
 
 #[derive(serde::Serialize)]
 struct BatchOutputLine<'a> {
@@ -82,6 +82,7 @@ fn gather_hashes(raw_jsonl: &[u8], running: Option<Arc<AtomicBool>>) -> Result<H
 pub async fn main_batch_query(
     mut common_args: CommonArgs,
     chat_args: ChatArgs,
+    schema_args: SchemaArgs,
     input_path: PathBuf,
     output_path: PathBuf,
     save_raw: bool,
@@ -91,7 +92,7 @@ pub async fn main_batch_query(
     let endpoint = common_args.common_setup().await?;
     let generation_args = common_args.get_generation_args()?;
     let generation_args = Arc::new(generation_args);
-    let chat_template = Arc::new(prepare_chat_request_template(&chat_args)?);
+    let chat_template = Arc::new(prepare_chat_request_template(&chat_args, &schema_args)?);
 
     if !quiet {
         print_logs(&endpoint, &generation_args);
