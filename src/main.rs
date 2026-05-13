@@ -302,6 +302,7 @@ impl CommonArgs {
                 api_key: self.api_key.clone().unwrap_or(String::new()),
                 providers: Vec::new(),
                 allow_fallbacks: true,
+                require_parameters: false,
             }
         } else {
             if let Some(ref model) = self.model {

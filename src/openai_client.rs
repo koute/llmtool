@@ -21,6 +21,7 @@ pub struct Endpoint {
     pub api_key: String,
     pub providers: Vec<String>,
     pub allow_fallbacks: bool,
+    pub require_parameters: bool,
 }
 
 impl Endpoint {
@@ -30,6 +31,7 @@ impl Endpoint {
             api_key: String::new(),
             providers: Vec::new(),
             allow_fallbacks: true,
+            require_parameters: false,
         }
     }
 
@@ -43,6 +45,7 @@ impl Endpoint {
             api_key,
             providers: Vec::new(),
             allow_fallbacks: true,
+            require_parameters: true,
         }
     }
 
@@ -84,6 +87,8 @@ pub struct RawProvider {
     pub order: Vec<String>,
     #[serde(skip_serializing_if = "is_true")]
     pub allow_fallbacks: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub require_parameters: bool,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize, Default)]
@@ -579,6 +584,7 @@ impl RawGenerationArgs {
             raw.provider = Some(RawProvider {
                 order: endpoint.providers.clone(),
                 allow_fallbacks: endpoint.allow_fallbacks,
+                require_parameters: endpoint.require_parameters,
             })
         }
         raw
