@@ -8,7 +8,7 @@ use crate::{ChatArgs, OutputFormat, SchemaArgs};
 pub fn prepare_chat_request_template(chat_args: &ChatArgs, schema_args: &SchemaArgs) -> Result<openai_client::ChatRequest, String> {
     let ChatArgs {
         ref system_prompt,
-        disable_thinking,
+        thinking,
         ref reasoning_effort,
     } = *chat_args;
 
@@ -25,7 +25,7 @@ pub fn prepare_chat_request_template(chat_args: &ChatArgs, schema_args: &SchemaA
 
     Ok(openai_client::ChatRequest {
         messages,
-        disable_thinking,
+        thinking,
         reasoning_effort: reasoning_effort.clone(),
         schema: if let Some(output_format_choice) = output_format_choice {
             Some(openai_client::Schema::Choice(

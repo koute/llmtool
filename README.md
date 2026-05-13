@@ -19,7 +19,7 @@ $ lt q What is 2+2?
 ```
 
 ```
-$ cat Cargo.toml | lt q -r --thinking=hide "Extract the list of dependencies from the following file as JSON, nicely formatted, with one line per dependency:\n\n" --output-format=json-array-of-objects
+$ cat Cargo.toml | lt q -r --thinking-display=hide "Extract the list of dependencies from the following file as JSON, nicely formatted, with one line per dependency:\n\n" --output-format=json-array-of-objects
 [
   {"name":"serde","version":"1","features":["derive"]},
   {"name":"serde_json","version":"1","features":["preserve_order","float_roundtrip"]},

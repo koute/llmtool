@@ -668,11 +668,23 @@ pub enum ToolDef {
     },
 }
 
+#[derive(Copy, Clone, serde::Serialize, clap::ValueEnum, Default)]
+pub enum Thinking {
+    #[default]
+    Auto,
+    Enable,
+    Disable,
+}
+
+fn is_auto(thinking: &Thinking) -> bool {
+    matches!(thinking, Thinking::Auto)
+}
+
 #[derive(Clone, serde::Serialize)]
 pub struct ChatRequest {
     pub messages: Vec<Message>,
-    #[serde(skip_serializing_if = "is_false")]
-    pub disable_thinking: bool,
+    #[serde(skip_serializing_if = "is_auto")]
+    pub thinking: Thinking,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -899,7 +911,7 @@ impl Request {
             }
             RequestKind::Chat(ChatRequest {
                 ref messages,
-                disable_thinking,
+                thinking,
                 ref reasoning_effort,
                 ref schema,
                 ref tools,
@@ -917,21 +929,29 @@ impl Request {
                     })
                     .collect();
 
-                if disable_thinking {
+                let thinking = match thinking {
+                    Thinking::Auto => None,
+                    Thinking::Enable => Some(true),
+                    Thinking::Disable => Some(false),
+                };
+
+                if let Some(thinking) = thinking {
                     let chat_template_kwargs = raw_request.chat_template_kwargs.get_or_insert(Value::Object(Default::default()));
                     let Value::Object(kwargs) = chat_template_kwargs else {
                         unreachable!()
                     };
-                    kwargs.insert("enable_thinking".into(), false.into());
+                    kwargs.insert("enable_thinking".into(), thinking.into());
                     kwargs.insert(
                         "thinking".into(),
                         Value::Object({
                             let mut map = serde_json::Map::new();
-                            map.insert("type".into(), "disabled".into());
+                            map.insert("type".into(), if thinking { "enabled" } else { "disabled" }.into());
                             map
                         }),
                     );
-                } else if raw_request.messages.iter().any(|message| message.reasoning.is_some()) {
+                }
+
+                if thinking.unwrap_or(true) && raw_request.messages.iter().any(|message| message.reasoning.is_some()) {
                     let chat_template_kwargs = raw_request.chat_template_kwargs.get_or_insert(Value::Object(Default::default()));
                     let Value::Object(kwargs) = chat_template_kwargs else {
                         unreachable!()

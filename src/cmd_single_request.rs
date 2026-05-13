@@ -3,7 +3,7 @@ use std::io::Write;
 
 use crate::openai_client;
 use crate::utils::{extract_response, prepare_chat_request_template, print_logs};
-use crate::{CommonArgs, IsEnabled, RequestKind, SingleRequestArgs, Thinking};
+use crate::{CommonArgs, DisplayThinking, IsEnabled, RequestKind, SingleRequestArgs};
 
 async fn cache_response(
     cache_address: &str,
@@ -28,7 +28,7 @@ pub async fn main_single_request(
     mut common_args: CommonArgs,
     query: Vec<String>,
     kind: RequestKind,
-    thinking: Thinking,
+    display_thinking: DisplayThinking,
     single_request_args: SingleRequestArgs,
 ) -> Result<(), String> {
     let SingleRequestArgs {
@@ -48,10 +48,10 @@ pub async fn main_single_request(
         IsEnabled::Auto => is_terminal,
     };
 
-    let hide_thinking = match thinking {
-        Thinking::Show => false,
-        Thinking::Hide => true,
-        Thinking::Auto => !is_terminal,
+    let hide_thinking = match display_thinking {
+        DisplayThinking::Show => false,
+        DisplayThinking::Hide => true,
+        DisplayThinking::Auto => !is_terminal,
     };
 
     let mut prompt = query.join(" ").replace("\\n", "\n");

@@ -98,8 +98,8 @@ enum OutputFormat {
 
 #[derive(Default, clap::Args)]
 pub struct ChatArgs {
-    #[clap(long)]
-    disable_thinking: bool,
+    #[clap(long, default_value = "auto")]
+    thinking: openai_client::Thinking,
 
     #[clap(long)]
     reasoning_effort: Option<String>,
@@ -144,7 +144,7 @@ impl From<OnOff> for bool {
 }
 
 #[derive(Copy, Clone, Default, clap::ValueEnum)]
-enum Thinking {
+enum DisplayThinking {
     #[default]
     Auto,
     Show,
@@ -178,7 +178,7 @@ enum Args {
     Q {
         /// Whether to display thinking. (NOTE: This doesn't affect whether the model's thinking is enabled.)
         #[clap(long, default_value = "auto")]
-        thinking: Thinking,
+        display_thinking: DisplayThinking,
 
         #[clap(flatten)]
         common_args: CommonArgs,
@@ -388,11 +388,11 @@ fn main() {
             common_args,
             query,
             RequestKind::Completion,
-            Thinking::Auto,
+            DisplayThinking::Auto,
             single_request_args,
         )),
         Args::Q {
-            thinking,
+            display_thinking,
             common_args,
             chat_args,
             schema_args,
@@ -402,7 +402,7 @@ fn main() {
             common_args,
             query,
             RequestKind::Chat(chat_args, schema_args),
-            thinking,
+            display_thinking,
             single_request_args,
         )),
         Args::BatchQuery {
