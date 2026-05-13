@@ -23,27 +23,35 @@ pub struct CommonArgs {
     #[clap(long)]
     pub seed: Option<u32>,
 
+    /// The maximum number of tokens to generate.
     #[clap(short = 'l', long)]
     pub max_tokens: Option<u32>,
 
     #[clap(short = 't', long)]
     pub temperature: Option<f32>,
 
+    /// Makes the model consider only the top K tokens.
     #[clap(long)]
     pub top_k: Option<u32>,
 
+    /// Makes the model consider only the tokens within the given probability mass. For example, '0.1' means that only the tokens comprising the top 10% probability mass are considered.
     #[clap(long)]
     pub top_p: Option<f32>,
 
+    // https://arxiv.org/abs/2407.01082
+    /// Makes the model consider only the tokens which are at least as probable as the top token multiplied by this value. For example, '0.1' means that only the tokens at least 1/10th as probable as the top token will be considered.
     #[clap(long)]
     pub min_p: Option<f32>,
 
+    /// Positive values penalize new tokens based on their existing frequency in the text so far, decreasing the model's likelihood to repeat the same line verbatim.
     #[clap(long)]
     pub frequency_penalty: Option<f32>,
 
+    /// Positive values penalize new tokens based on whether they appear in the text so far, increasing the model's likelihood to talk about new topics.
     #[clap(long)]
     pub presence_penalty: Option<f32>,
 
+    /// Penalizes new tokens based on whether they appear in the prompt and the generated text so far. Values > 1 encourage the model to use new tokens, while values < 1 encourage the model to repeat tokens.
     #[clap(long)]
     pub repetition_penalty: Option<f32>,
 
@@ -56,15 +64,19 @@ pub struct CommonArgs {
     #[clap(short = 'r', long)]
     pub reproducible: bool,
 
+    /// The URL of the target endpoint.
     #[clap(long)]
     pub url: Option<String>,
 
+    /// The API key to use.
     #[clap(long)]
     pub api_key: Option<String>,
 
+    /// A comma-separated list of OpenRouter providers to use.
     #[clap(long)]
     pub provider: Option<String>,
 
+    /// The priority of the request. Higher values mean lower priority.
     #[clap(long)]
     pub niceness: Option<i64>,
 
@@ -160,6 +172,7 @@ pub struct SingleRequestArgs {
 enum Args {
     /// Sends a single chat completion query.
     Q {
+        /// Whether to display thinking. (NOTE: This doesn't affect whether the model's thinking is enabled.)
         #[clap(long, default_value = "auto")]
         thinking: Thinking,
 
