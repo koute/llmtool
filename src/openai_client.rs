@@ -442,6 +442,7 @@ impl Response {
 fn parse_response(raw_string: &str, original_request: Option<Arc<String>>, delta_state: Option<&mut DeltaState>) -> Response {
     let raw_value: Result<Value, _> = serde_json::from_str(raw_string);
     let raw = Some(raw_string.to_owned());
+    let original_request_clone = original_request.clone();
     let create_response = |obj| Response {
         obj,
         raw,
@@ -516,8 +517,30 @@ fn parse_response(raw_string: &str, original_request: Option<Arc<String>>, delta
                 }
             }
 
+            let mut finish_reason = choice.finish_reason;
+            if finish_reason == Some(FinishReason::Stop) {
+                if let Some(ref usage) = response.usage {
+                    if let Some(raw_request) = original_request_clone {
+                        let raw_request: Result<serde_json::Value, _> = serde_json::from_str(&raw_request);
+                        if let Ok(raw_request) = raw_request {
+                            if let Some(max_tokens) = raw_request
+                                .as_object()
+                                .and_then(|obj| obj.get("max_tokens"))
+                                .and_then(|value| value.as_u64())
+                            {
+                                if usage.completion_tokens == u64::from(max_tokens) {
+                                    // Work around a super dumb llama.cpp behavior where it'll send "stop" for requests
+                                    // that were truncated due to length.
+                                    finish_reason = Some(FinishReason::Length);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             let response = ResponseOk {
-                finish_reason: choice.finish_reason,
+                finish_reason,
                 content: text,
                 reasoning_content: reasoning_content,
                 model: response.model,
@@ -1659,4 +1682,13 @@ fn test_streaming_tool_call() {
     let response = state.finalize().unwrap();
     let response = serde_json::to_string_pretty(&response).unwrap();
     assert_eq!(EXPECTED_RESPONSE.trim(), response.trim());
+}
+
+#[test]
+fn test_truncated_stop_reason_fix() {
+    let data_req = include_str!("test-data/truncated-llama-cpp-request.json");
+    let data_rsp = include_str!("test-data/truncated-llama-cpp-response.json");
+
+    let response = parse_response(&data_rsp, Some(Arc::new(data_req.into())), None).obj.unwrap();
+    assert_eq!(response.unwrap().finish_reason, Some(FinishReason::Length));
 }

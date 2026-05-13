@@ -1,0 +1,16 @@
+{
+  "model": "minimax-m2.5",
+  "max_tokens": 1024,
+  "temperature": 1.5,
+  "min_p": 0.1,
+  "messages": [
+    {
+      "role": "system",
+      "content": "Solve the given math problem. The last line of your response MUST contain ONLY the final answer, and nothing else!"
+    },
+    {
+      "role": "user",
+      "content": "What is the general criterion to find the number of bases in a vector space $V_{n}(\\mathbb{Z}_{p})$ over the field $\\mathbb{Z}_{p}$ with $\\dim V_{n} = n$? For example, find the number of bases in $V_{2}(\\mathbb{Z}_{3})$."
+    }
+  ]
+}
