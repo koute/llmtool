@@ -223,18 +223,18 @@ pub struct Usage {
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, serde::Serialize, serde::Deserialize)]
-struct RawFunctionCall {
-    name: Option<String>,
-    arguments: Option<String>,
+pub struct RawFunctionCall {
+    pub name: Option<String>,
+    pub arguments: Option<String>,
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RawToolCall {
-    id: Option<String>,
+    pub id: Option<String>,
     #[serde(rename = "type")]
-    kind: Option<String>,
+    pub kind: Option<String>,
     // index: u64,
-    function: Option<RawFunctionCall>,
+    pub function: Option<RawFunctionCall>,
 }
 
 impl RawToolCall {
