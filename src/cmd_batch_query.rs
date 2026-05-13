@@ -249,10 +249,7 @@ pub async fn main_batch_query(
                     };
 
                     let mut kind = (*chat_template).clone();
-                    kind.messages.push(openai_client::Message {
-                        role: "user".into(),
-                        content: prompt.clone(),
-                    });
+                    kind.messages.push(openai_client::Message::new("user".into(), prompt.clone()));
 
                     let req = openai_client::Request {
                         args: (*generation_args).clone(),
@@ -293,6 +290,7 @@ pub async fn main_batch_query(
                             }
                             Some(openai_client::FinishReason::Length) => "length",
                             Some(openai_client::FinishReason::Stop) => "stop",
+                            Some(openai_client::FinishReason::ToolCalls) => "tool_calls",
                         },
                         reasoning_content: response.reasoning_content.as_ref().map(|text| &**text),
                         timestamp: now.format(&time::format_description::well_known::Rfc3339).unwrap(),

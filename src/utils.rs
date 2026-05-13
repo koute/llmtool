@@ -16,10 +16,7 @@ pub fn prepare_chat_request_template(chat_args: &ChatArgs) -> Result<openai_clie
     } = *chat_args;
     let mut messages = Vec::new();
     if let Some(content) = system_prompt {
-        messages.push(openai_client::Message {
-            role: "system".into(),
-            content: content.to_owned(),
-        });
+        messages.push(openai_client::Message::new("system".into(), content.to_owned()));
     }
 
     Ok(openai_client::ChatRequest {
@@ -46,6 +43,7 @@ pub fn prepare_chat_request_template(chat_args: &ChatArgs) -> Result<openai_clie
                 None => None,
             }
         },
+        tools: Default::default(),
     })
 }
 

@@ -1,5 +1,6 @@
 use futures::prelude::*;
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -149,7 +150,10 @@ pub struct RawGenerationArgs {
     pub prompt: Option<String>,
 
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub messages: Vec<Message>,
+    pub messages: Vec<RawMessageOut>,
+
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<RawToolDef>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chat_template_kwargs: Option<Value>,
@@ -206,6 +210,7 @@ impl ResponseError {
 pub enum FinishReason {
     Length,
     Stop,
+    ToolCalls,
 }
 
 #[derive(Clone, serde::Deserialize, Debug)]
@@ -215,11 +220,27 @@ pub struct Usage {
     // pub total_tokens: u64,
 }
 
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, serde::Serialize, serde::Deserialize)]
+struct RawFunctionCall {
+    name: String,
+    arguments: String,
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, serde::Serialize, serde::Deserialize)]
+pub struct RawToolCall {
+    id: String,
+    #[serde(rename = "type")]
+    kind: String,
+    // index: u64,
+    function: Option<RawFunctionCall>,
+}
+
 #[derive(serde::Deserialize, Debug)]
-struct RawMessage {
+struct RawMessageIn {
     content: Option<String>,
     reasoning: Option<String>,
     reasoning_content: Option<String>,
+    tool_calls: Option<Vec<RawToolCall>>,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -227,6 +248,7 @@ struct RawDelta {
     content: Option<String>,
     reasoning: Option<String>,
     reasoning_content: Option<String>,
+    tool_calls: Option<Vec<RawToolCall>>,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -242,7 +264,7 @@ struct RawChoice {
     finish_reason: Option<FinishReason>,
 
     text: Option<String>,
-    message: Option<RawMessage>,
+    message: Option<RawMessageIn>,
     delta: Option<RawDelta>,
 
     error: Option<RawChoiceError>,
@@ -260,6 +282,18 @@ struct RawResponseOk {
 }
 
 #[derive(Clone, Debug)]
+pub struct ToolCallRequest {
+    pub id: String,
+    pub kind: ToolCallRequestKind,
+    pub raw: RawToolCall,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum ToolCallRequestKind {
+    Function { name: String, args: serde_json::Value },
+}
+
+#[derive(Clone, Debug)]
 pub struct ResponseOk {
     pub finish_reason: Option<FinishReason>,
     pub text: String,
@@ -267,6 +301,7 @@ pub struct ResponseOk {
     pub usage: Option<Usage>,
     pub model: String,
     pub kind: ResponseKind,
+    pub tool_calls: Vec<ToolCallRequest>,
 }
 
 impl ResponseOk {
@@ -344,19 +379,21 @@ fn parse_response(raw_string: &str, original_request: Option<Arc<String>>, delta
                 return create_response(Err(format!("response returned an error: code {}: {}", error.code, error.message)));
             }
 
-            let (is_streaming, text, reasoning_content) = if let Some(message) = choice.message {
+            let (is_streaming, text, reasoning_content, raw_tool_calls) = if let Some(message) = choice.message {
                 (
                     false,
                     message.content.unwrap_or(String::new()),
                     message.reasoning_content.or(message.reasoning),
+                    message.tool_calls,
                 )
             } else if let Some(text) = choice.text {
-                (false, text, None)
+                (false, text, None, None)
             } else if let Some(delta) = choice.delta {
                 (
                     true,
                     delta.content.unwrap_or(String::new()),
                     delta.reasoning_content.or(delta.reasoning),
+                    delta.tool_calls,
                 )
             } else {
                 return create_response(Err(format!("response is missing 'text' and 'message'")));
@@ -366,6 +403,36 @@ fn parse_response(raw_string: &str, original_request: Option<Arc<String>>, delta
                 if let Some(delta_state) = delta_state {
                     if let Err(error) = delta_state.apply(&raw_value) {
                         return create_response(Err(format!("failed to apply delta state: {error}")));
+                    }
+                }
+            }
+
+            let mut tool_calls = Vec::new();
+            if let Some(raw_tool_calls) = raw_tool_calls {
+                for raw_tool_call in raw_tool_calls {
+                    match &*raw_tool_call.kind {
+                        "function" => {
+                            let Some(ref raw_function) = raw_tool_call.function else {
+                                return create_response(Err(format!("malformed tool call: has 'function' type but no 'function' field")));
+                            };
+
+                            let args: serde_json::Value = match serde_json::from_str(&raw_function.arguments) {
+                                Ok(arguments) => arguments,
+                                Err(_) => {
+                                    return create_response(Err(format!("malformed tool call found: failed to parse 'arguments'")));
+                                }
+                            };
+
+                            tool_calls.push(ToolCallRequest {
+                                raw: raw_tool_call.clone(),
+                                id: raw_tool_call.id,
+                                kind: ToolCallRequestKind::Function {
+                                    name: raw_function.name.clone(),
+                                    args,
+                                },
+                            });
+                        }
+                        kind => return create_response(Err(format!("received unsupported tool call type: '{kind}'"))),
                     }
                 }
             }
@@ -381,6 +448,7 @@ fn parse_response(raw_string: &str, original_request: Option<Arc<String>>, delta
                 } else {
                     ResponseKind::Normal
                 },
+                tool_calls,
             };
 
             Ok(Ok(response))
@@ -461,6 +529,61 @@ pub struct CompletionRequest {
 pub struct Message {
     pub role: String,
     pub content: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<RawToolCall>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+}
+
+impl Message {
+    pub fn new(role: String, content: String) -> Self {
+        Self {
+            role,
+            content,
+            reasoning_content: None,
+            tool_calls: None,
+            tool_call_id: None,
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, serde::Serialize, serde::Deserialize, Default)]
+pub struct RawMessageOut {
+    pub role: String,
+    pub content: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<RawToolCall>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize, Default)]
+pub struct RawFunctionDef {
+    pub name: String,
+    pub description: String,
+    #[serde(rename = "parameters")]
+    pub args_schema: serde_json::Value,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize, Default)]
+pub struct RawToolDef {
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub function: Option<RawFunctionDef>,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -475,6 +598,30 @@ pub enum Schema {
 }
 
 #[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArgKind {
+    Bool,
+    String,
+    Number,
+}
+
+#[derive(Clone, serde::Serialize)]
+pub struct Argument {
+    pub description: String,
+    pub kind: ArgKind,
+    pub is_required: bool,
+}
+
+#[derive(Clone, serde::Serialize)]
+pub enum ToolDef {
+    Function {
+        name: String,
+        description: String,
+        args: BTreeMap<String, Argument>,
+    },
+}
+
+#[derive(Clone, serde::Serialize)]
 pub struct ChatRequest {
     pub messages: Vec<Message>,
     #[serde(skip_serializing_if = "is_false")]
@@ -483,6 +630,8 @@ pub struct ChatRequest {
     pub reasoning_effort: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schema: Option<Schema>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<ToolDef>,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -704,8 +853,20 @@ impl Request {
                 disable_thinking,
                 ref reasoning_effort,
                 ref schema,
+                ref tools,
             }) => {
-                raw_request.messages = messages.clone();
+                raw_request.messages = messages
+                    .iter()
+                    .map(|message| RawMessageOut {
+                        role: message.role.clone(),
+                        content: message.content.clone(),
+                        reasoning: message.reasoning_content.clone(),
+                        reasoning_content: message.reasoning_content.clone(),
+                        tool_calls: message.tool_calls.clone(),
+                        tool_call_id: message.tool_call_id.clone(),
+                    })
+                    .collect();
+
                 if disable_thinking {
                     let chat_template_kwargs = raw_request.chat_template_kwargs.get_or_insert(Value::Object(Default::default()));
                     let Value::Object(kwargs) = chat_template_kwargs else {
@@ -772,6 +933,56 @@ impl Request {
                         raw_request.structured_outputs = Some(RawStructuredOutputs {
                             choice: Some(choices.clone()),
                         })
+                    }
+                }
+
+                for tool in tools {
+                    match tool {
+                        ToolDef::Function { name, description, args } => {
+                            let mut required: Vec<String> = Vec::new();
+                            let mut raw_args = serde_json::Map::new();
+                            for (key, arg) in args {
+                                let kind;
+                                match arg.kind {
+                                    ArgKind::Bool => {
+                                        kind = "boolean";
+                                    }
+                                    ArgKind::String => {
+                                        kind = "string";
+                                    }
+                                    ArgKind::Number => {
+                                        kind = "number";
+                                    }
+                                }
+
+                                let def = serde_json::json!({
+                                    "description": arg.description,
+                                    "type": kind
+                                });
+
+                                raw_args.insert(key.into(), def);
+                                if arg.is_required {
+                                    required.push(key.into());
+                                }
+                            }
+
+                            let args_schema = serde_json::json!({
+                                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                                "type": "object",
+                                "properties": serde_json::Value::Object(raw_args),
+                                "required": required,
+                                "additionalProperties": false,
+                            });
+
+                            raw_request.tools.push(RawToolDef {
+                                kind: "function".into(),
+                                function: Some(RawFunctionDef {
+                                    name: name.clone(),
+                                    description: description.clone(),
+                                    args_schema,
+                                }),
+                            })
+                        }
                     }
                 }
             }

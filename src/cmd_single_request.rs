@@ -83,10 +83,7 @@ pub async fn main_single_request(
             RequestKind::Completion => openai_client::RequestKind::Completion(openai_client::CompletionRequest { prompt }),
             RequestKind::Chat(ref chat_args) => {
                 let mut req = prepare_chat_request_template(chat_args)?;
-                req.messages.push(openai_client::Message {
-                    role: "user".into(),
-                    content: prompt,
-                });
+                req.messages.push(openai_client::Message::new("user".into(), prompt));
                 openai_client::RequestKind::Chat(req)
             }
         },

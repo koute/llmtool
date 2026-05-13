@@ -26,7 +26,7 @@ fn add_response_to_cache(
     match response.obj {
         Ok(Ok(ref response_ok)) => {
             let cache_key = match response_ok.finish_reason {
-                Some(FinishReason::Stop) => Some(cache_key),
+                Some(FinishReason::Stop | FinishReason::ToolCalls) => Some(cache_key),
                 Some(FinishReason::Length) => cache_key_with_token_limit,
                 None => None,
             };
