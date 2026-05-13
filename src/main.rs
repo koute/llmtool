@@ -215,6 +215,8 @@ enum Args {
         #[clap(flatten)]
         args: crate::cmd_batch_query::BatchQueryArgs,
     },
+    /// Batch query many requests (completion endpoint).
+    BatchCompletion(crate::cmd_batch_query::BatchQueryArgs),
     /// Sanity-checks the model.
     SanityCheck(crate::cmd_sanity_check::SanityCheckArgs),
     /// Lists all available models.
@@ -392,7 +394,8 @@ fn main() {
             chat_args,
             schema_args,
             args,
-        } => big_runtime().block_on(crate::cmd_batch_query::main_batch_query(chat_args, schema_args, args)),
+        } => big_runtime().block_on(crate::cmd_batch_query::main_batch_query(Some((chat_args, schema_args)), args)),
+        Args::BatchCompletion(args) => big_runtime().block_on(crate::cmd_batch_query::main_batch_query(None, args)),
         Args::ListModels { url } => small_runtime().block_on(main_list_models(url)),
         Args::CacheServer { host, port, cache_path } => {
             big_runtime().block_on(crate::cmd_cache_server::main_cache_server(&format!("{host}:{port}"), cache_path))

@@ -104,8 +104,7 @@ fn gather_hashes(raw_jsonl: &[u8], running: Option<Arc<AtomicBool>>) -> Result<H
 }
 
 pub async fn main_batch_query(
-    chat_args: ChatArgs,
-    schema_args: SchemaArgs,
+    chat_and_schema_args: Option<(ChatArgs, SchemaArgs)>,
     BatchQueryArgs {
         mut common_args,
         input: input_path,
@@ -119,7 +118,11 @@ pub async fn main_batch_query(
     let endpoint = common_args.common_setup().await?;
     let generation_args = common_args.get_generation_args()?;
     let generation_args = Arc::new(generation_args);
-    let chat_template = Arc::new(prepare_chat_request_template(&chat_args, &schema_args)?);
+    let chat_template = Arc::new(if let Some((chat_args, schema_args)) = chat_and_schema_args {
+        Some(prepare_chat_request_template(&chat_args, &schema_args)?)
+    } else {
+        None
+    });
 
     if !quiet {
         print_logs(&endpoint, &generation_args);
@@ -282,12 +285,16 @@ pub async fn main_batch_query(
                         return;
                     }
 
-                    let mut kind = (*chat_template).clone();
-                    kind.messages.push(openai_client::Message::new("user".into(), prompt.clone()));
+                    let kind = if let Some(mut kind) = (*chat_template).clone() {
+                        kind.messages.push(openai_client::Message::new("user".into(), prompt.clone()));
+                        openai_client::RequestKind::Chat(kind)
+                    } else {
+                        openai_client::RequestKind::Completion(openai_client::CompletionRequest { prompt: prompt.clone() })
+                    };
 
                     let req = openai_client::Request {
                         args: (*generation_args).clone(),
-                        kind: openai_client::RequestKind::Chat(kind),
+                        kind,
                     };
 
                     let raw_response = req.send(&endpoint).await;
