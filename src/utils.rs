@@ -48,6 +48,7 @@ pub fn prepare_chat_request_template(chat_args: &ChatArgs, schema_args: &SchemaA
             }
         },
         tools: Default::default(),
+        tool_choice: Default::default(),
     })
 }
 

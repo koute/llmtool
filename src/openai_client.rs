@@ -154,6 +154,8 @@ pub struct RawGenerationArgs {
 
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<RawToolDef>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<serde_json::Value>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chat_template_kwargs: Option<Value>,
@@ -279,6 +281,16 @@ struct RawResponseOk {
     model: String,
     // system_fingerprint: Option<String>,
     // created: u64,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolChoice {
+    None,
+    Auto,
+    Required,
+    Function(String),
+    AnyOf(Vec<String>),
 }
 
 #[derive(Clone, Debug)]
@@ -648,6 +660,8 @@ pub struct ChatRequest {
     pub schema: Option<Schema>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<ToolDef>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<ToolChoice>,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -870,6 +884,7 @@ impl Request {
                 ref reasoning_effort,
                 ref schema,
                 ref tools,
+                ref tool_choice,
             }) => {
                 raw_request.messages = messages
                     .iter()
@@ -1009,6 +1024,31 @@ impl Request {
                             })
                         }
                     }
+                }
+
+                if let Some(tool_choice) = tool_choice {
+                    let tool_choice: serde_json::Value = match tool_choice {
+                        ToolChoice::None => "none".into(),
+                        ToolChoice::Auto => "auto".into(),
+                        ToolChoice::Required => "required".into(),
+                        ToolChoice::Function(name) => serde_json::json! {{
+                            "type": "function",
+                            "function": {
+                                "name": name,
+                            }
+                        }},
+                        ToolChoice::AnyOf(names) => serde_json::json! {{
+                            "type": "allowed_tools",
+                            "allowed_tools": names.into_iter().map(|name| serde_json::json! {{
+                                "type": "function",
+                                "function": {
+                                    "name": name,
+                                }
+                            }}).collect::<Vec<_>>()
+                        }},
+                    };
+
+                    raw_request.tool_choice = Some(tool_choice);
                 }
             }
         };
