@@ -8,6 +8,7 @@ mod cache_client;
 mod cmd_batch_query;
 mod cmd_cache_server;
 mod cmd_router;
+mod cmd_sanity_check;
 mod cmd_single_request;
 mod openai_client;
 mod utils;
@@ -229,6 +230,8 @@ enum Args {
         #[clap(long)]
         quiet: bool,
     },
+    /// Sanity-checks the model.
+    SanityCheck(crate::cmd_sanity_check::SanityCheckArgs),
     /// Lists all available models.
     ListModels {
         #[clap(long)]
@@ -423,6 +426,7 @@ fn main() {
             big_runtime().block_on(crate::cmd_cache_server::main_cache_server(&format!("{host}:{port}"), cache_path))
         }
         Args::Router(args) => big_runtime().block_on(crate::cmd_router::main_proxy_server(args)),
+        Args::SanityCheck(args) => small_runtime().block_on(crate::cmd_sanity_check::main_sanity_check(args)),
     };
 
     if let Err(error) = error {
