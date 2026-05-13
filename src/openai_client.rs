@@ -345,6 +345,13 @@ pub struct ToolCallRequest {
     pub raw: RawToolCall,
 }
 
+impl ToolCallRequest {
+    pub fn is_function_named(&self, tool_name: &str) -> bool {
+        let ToolCallRequestKind::Function { ref name, .. } = self.kind;
+        name == tool_name
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum ToolCallRequestKind {
     Function { name: String, args: serde_json::Value },
