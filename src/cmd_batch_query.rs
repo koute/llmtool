@@ -332,6 +332,7 @@ pub async fn main_batch_query(
                             Some(openai_client::FinishReason::Length) => "length",
                             Some(openai_client::FinishReason::Stop) => "stop",
                             Some(openai_client::FinishReason::ToolCalls) => "tool_calls",
+                            Some(openai_client::FinishReason::ContentFilter) => "content_filter",
                         },
                         reasoning_content: response.reasoning_content.as_ref().map(|text| &**text),
                         timestamp: now.format(&time::format_description::well_known::Rfc3339).unwrap(),

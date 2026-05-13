@@ -28,7 +28,7 @@ fn add_response_to_cache(
             let cache_key = match response_ok.finish_reason {
                 Some(FinishReason::Stop | FinishReason::ToolCalls) => Some(cache_key),
                 Some(FinishReason::Length) => cache_key_with_token_limit,
-                None => None,
+                Some(FinishReason::ContentFilter) | None => None,
             };
 
             if let Some(cache_key) = cache_key {

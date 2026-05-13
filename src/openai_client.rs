@@ -246,6 +246,7 @@ pub enum FinishReason {
     Length,
     Stop,
     ToolCalls,
+    ContentFilter,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize, Debug)]
