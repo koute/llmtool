@@ -237,6 +237,51 @@ pub struct RawToolCall {
     function: Option<RawFunctionCall>,
 }
 
+impl RawToolCall {
+    pub fn parse(&self) -> Result<ToolCallRequest, String> {
+        let Some(kind) = self.kind.as_ref() else {
+            return Err(format!("'type' not found"));
+        };
+
+        let Some(id) = self.id.as_ref() else {
+            return Err(format!("'id' not found"));
+        };
+
+        match kind.as_str() {
+            "function" => {
+                let Some(ref raw_function) = self.function else {
+                    return Err(format!("has 'function' type but no 'function' field"));
+                };
+
+                let Some(args) = raw_function.arguments.as_ref() else {
+                    return Err(format!("'function.arguments' not found"));
+                };
+
+                let args: serde_json::Value = match serde_json::from_str(&args) {
+                    Ok(arguments) => arguments,
+                    Err(_) => {
+                        return Err(format!("failed to parse 'function.arguments'"));
+                    }
+                };
+
+                let Some(name) = raw_function.name.as_ref() else {
+                    return Err(format!("'function.name' not found"));
+                };
+
+                Ok(ToolCallRequest {
+                    raw: self.clone(),
+                    id: id.to_owned(),
+                    kind: ToolCallRequestKind::Function {
+                        name: name.to_owned(),
+                        args,
+                    },
+                })
+            }
+            kind => Err(format!("unsupported tool call type: '{kind}'")),
+        }
+    }
+}
+
 #[derive(serde::Deserialize, Debug)]
 struct RawMessageIn {
     content: Option<String>,
@@ -422,45 +467,9 @@ fn parse_response(raw_string: &str, original_request: Option<Arc<String>>, delta
             let mut tool_calls = Vec::new();
             if let Some(raw_tool_calls) = raw_tool_calls {
                 for raw_tool_call in raw_tool_calls {
-                    let Some(kind) = raw_tool_call.kind.as_ref() else {
-                        return create_response(Err(format!("malformed tool call found: 'type' not found")));
-                    };
-
-                    let Some(id) = raw_tool_call.id.as_ref() else {
-                        return create_response(Err(format!("malformed tool call found: 'id' not found")));
-                    };
-
-                    match kind.as_str() {
-                        "function" => {
-                            let Some(ref raw_function) = raw_tool_call.function else {
-                                return create_response(Err(format!("malformed tool call: has 'function' type but no 'function' field")));
-                            };
-
-                            let Some(args) = raw_function.arguments.as_ref() else {
-                                return create_response(Err(format!("malformed tool call found: 'arguments' not found")));
-                            };
-
-                            let args: serde_json::Value = match serde_json::from_str(&args) {
-                                Ok(arguments) => arguments,
-                                Err(_) => {
-                                    return create_response(Err(format!("malformed tool call found: failed to parse 'arguments'")));
-                                }
-                            };
-
-                            let Some(name) = raw_function.name.as_ref() else {
-                                return create_response(Err(format!("malformed tool call found: 'name' not found")));
-                            };
-
-                            tool_calls.push(ToolCallRequest {
-                                raw: raw_tool_call.clone(),
-                                id: id.to_owned(),
-                                kind: ToolCallRequestKind::Function {
-                                    name: name.to_owned(),
-                                    args,
-                                },
-                            });
-                        }
-                        kind => return create_response(Err(format!("received unsupported tool call type: '{kind}'"))),
+                    match raw_tool_call.parse() {
+                        Ok(tool_call) => tool_calls.push(tool_call),
+                        Err(error) => return create_response(Err(format!("malformed tool call found: {error}"))),
                     }
                 }
             }
