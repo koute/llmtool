@@ -30,6 +30,9 @@ pub struct CommonArgs {
     pub temperature: Option<f32>,
 
     #[clap(long)]
+    pub top_k: Option<u32>,
+
+    #[clap(long)]
     pub top_p: Option<f32>,
 
     #[clap(long)]
@@ -242,6 +245,7 @@ impl CommonArgs {
             max_tokens: self.max_tokens,
             temperature: self.temperature,
             top_p: self.top_p,
+            top_k: self.top_k,
             min_p: self.min_p,
             frequency_penalty: self.frequency_penalty,
             presence_penalty: self.presence_penalty,
