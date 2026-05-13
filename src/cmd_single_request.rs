@@ -35,6 +35,7 @@ pub async fn main_single_request(
         streaming,
         verbose,
         stdin,
+        print_raw_request,
         print_raw_response,
         disable_cache,
     } = single_request_args;
@@ -119,6 +120,12 @@ pub async fn main_single_request(
 
     if verbose {
         print_logs(&endpoint, &request.args);
+    }
+
+    if print_raw_request {
+        if let Ok(request) = request.serialize_request(&endpoint, false) {
+            println!("{request}");
+        }
     }
 
     if streaming && cached_response.is_none() {

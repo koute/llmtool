@@ -144,6 +144,9 @@ pub struct SingleRequestArgs {
     stdin: IsEnabled,
 
     #[clap(long)]
+    print_raw_request: bool,
+
+    #[clap(long)]
     print_raw_response: bool,
 
     #[clap(long)]

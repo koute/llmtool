@@ -688,18 +688,13 @@ pub fn handle_streaming(client: reqwest::Response) -> Result<Pin<Box<dyn futures
 }
 
 impl Request {
-    async fn send_impl(
-        &self,
-        endpoint: &Endpoint,
-        stream: bool,
-    ) -> Result<(Result<reqwest::Response, reqwest::Error>, Arc<String>), String> {
+    pub fn serialize_request(&self, endpoint: &Endpoint, stream: bool) -> Result<String, String> {
         let mut raw_request = RawGenerationArgs::new(endpoint, &self.args);
         raw_request.stream = stream;
 
-        let url = match self.kind {
+        match self.kind {
             RequestKind::Completion(CompletionRequest { ref prompt }) => {
                 raw_request.prompt = Some(prompt.clone());
-                endpoint.completion_url()
             }
             RequestKind::Chat(ChatRequest {
                 ref messages,
@@ -776,11 +771,23 @@ impl Request {
                         })
                     }
                 }
-                endpoint.chat_url()
             }
         };
 
-        let raw_request_s = serde_json::to_string(&raw_request).unwrap();
+        serde_json::to_string(&raw_request).map_err(|error| format!("failed to serialize request as JSON: {error}"))
+    }
+
+    async fn send_impl(
+        &self,
+        endpoint: &Endpoint,
+        stream: bool,
+    ) -> Result<(Result<reqwest::Response, reqwest::Error>, Arc<String>), String> {
+        let raw_request_s = self.serialize_request(endpoint, stream)?;
+        let url = match self.kind {
+            RequestKind::Completion(..) => endpoint.completion_url(),
+            RequestKind::Chat(..) => endpoint.chat_url(),
+        };
+
         let client = reqwest::Client::new();
         let mut client = client
             .post(&url)
