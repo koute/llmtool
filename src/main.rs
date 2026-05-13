@@ -122,6 +122,9 @@ pub struct SingleRequestArgs {
 
     #[clap(long)]
     print_raw_response: bool,
+
+    #[clap(long)]
+    disable_cache: bool,
 }
 
 #[derive(clap::Parser)]

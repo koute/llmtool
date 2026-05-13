@@ -18,6 +18,7 @@ pub async fn main_single_request(
         verbose,
         stdin,
         print_raw_response,
+        disable_cache,
     } = single_request_args;
 
     use std::io::IsTerminal;
@@ -72,7 +73,7 @@ pub async fn main_single_request(
         },
     };
 
-    let use_cache = !streaming;
+    let use_cache = !disable_cache && !streaming;
     let cache_address = "127.0.0.1:9999";
     let mut cached_response: Option<(openai_client::ResponseOk, Option<String>)> = None;
     let request_for_cache = if use_cache {
