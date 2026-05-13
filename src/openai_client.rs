@@ -204,7 +204,7 @@ pub struct RawGenerationArgs {
     pub include_stop_str_in_output: bool,
 }
 
-const TIMEOUT: core::time::Duration = core::time::Duration::from_secs(60 * 60);
+const TIMEOUT: core::time::Duration = core::time::Duration::from_secs(120 * 60);
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub struct ResponseError {
