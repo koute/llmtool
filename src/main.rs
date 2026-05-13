@@ -3,10 +3,14 @@ use clap::Parser;
 use openai_client::Endpoint;
 use std::path::PathBuf;
 
+mod agent;
+mod agent_tools;
+mod agent_utils;
 mod cache;
 mod cache_client;
 mod cmd_batch_query;
 mod cmd_cache_server;
+mod cmd_do;
 mod cmd_router;
 mod cmd_sanity_check;
 mod cmd_single_request;
@@ -250,6 +254,8 @@ enum Args {
     },
     /// Starts an OpenAI-compatible HTTP proxy/router.
     Router(crate::cmd_router::RouterArgs),
+    /// Runs an agent to do something.
+    Do(crate::cmd_do::DoArgs),
 }
 
 const DEFAULT_LOCAL_PORT: u32 = 9001;
@@ -417,6 +423,7 @@ fn main() {
         }
         Args::Router(args) => big_runtime().block_on(crate::cmd_router::main_proxy_server(args)),
         Args::SanityCheck(args) => small_runtime().block_on(crate::cmd_sanity_check::main_sanity_check(args)),
+        Args::Do(args) => big_runtime().block_on(crate::cmd_do::main_do(args)),
     };
 
     if let Err(error) = error {
