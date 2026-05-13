@@ -1,6 +1,5 @@
 use futures::prelude::*;
 use std::io::Write;
-use std::sync::Arc;
 
 use crate::openai_client;
 use crate::utils::{extract_response, prepare_chat_request_template, print_logs};
@@ -104,7 +103,7 @@ pub async fn main_single_request(
         match crate::cache_client::cache_get(cache_address, &request_for_cache).await {
             Ok(Some(response)) => {
                 // Converting it back to string is silly, but whatever.
-                let response = openai_client::Response::from_raw(&serde_json::to_string(&response).unwrap(), Arc::new(String::new()));
+                let response = openai_client::Response::from_raw(&serde_json::to_string(&response).unwrap(), None);
                 if let Ok(Ok(response_ok)) = response.obj {
                     cached_response = Some((response_ok, response.raw));
                 }

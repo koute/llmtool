@@ -275,18 +275,18 @@ impl Response {
         serde_json::from_str(&req).ok()
     }
 
-    pub fn from_raw(raw_string: &str, raw_request: Arc<String>) -> Self {
+    pub fn from_raw(raw_string: &str, raw_request: Option<Arc<String>>) -> Self {
         parse_response(raw_string, raw_request, None)
     }
 }
 
-fn parse_response(raw_string: &str, raw_request: Arc<String>, delta_state: Option<&mut DeltaState>) -> Response {
+fn parse_response(raw_string: &str, original_request: Option<Arc<String>>, delta_state: Option<&mut DeltaState>) -> Response {
     let raw_value: Result<Value, _> = serde_json::from_str(raw_string);
     let raw = Some(raw_string.to_owned());
     let create_response = |obj| Response {
         obj,
         raw,
-        original_request: Some(raw_request),
+        original_request,
     };
 
     let raw_value = match raw_value {
@@ -548,6 +548,114 @@ pub struct Request {
     pub kind: RequestKind,
 }
 
+enum StreamingChunk {
+    Payload(String),
+    Chunk(String),
+    Finish,
+    Error(String),
+}
+
+fn handle_streaming(client: reqwest::Response) -> Result<Pin<Box<dyn futures::Stream<Item = StreamingChunk>>>, String> {
+    struct State {
+        buffer: Vec<u8>,
+        client: reqwest::Response,
+        is_finished: bool,
+        sent_finish: bool,
+    }
+
+    let stream = futures::stream::unfold(
+        State {
+            client,
+            buffer: Vec::new(),
+            is_finished: false,
+            sent_finish: false,
+        },
+        move |mut state: State| {
+            // https://html.spec.whatwg.org/multipage/server-sent-events.html#parsing-an-event-stream
+            async move {
+                loop {
+                    let mut chunk_length = state.buffer.iter().position(|&ch| ch == b'\n' || ch == b'\r');
+                    if chunk_length.is_none() && state.is_finished && !state.buffer.is_empty() {
+                        chunk_length = Some(state.buffer.len());
+                    }
+
+                    if let Some(mut chunk_length) = chunk_length {
+                        let chunk = &state.buffer[..chunk_length];
+                        let Ok(mut chunk) = std::str::from_utf8(&chunk) else {
+                            return Some((Ok(StreamingChunk::Error("response is not valid UTF-8".into())), state));
+                        };
+
+                        chunk_length += 1;
+                        if state.buffer.get(chunk_length).copied() == Some(b'\n') {
+                            chunk_length += 1;
+                        }
+
+                        chunk_length = chunk_length.min(state.buffer.len());
+
+                        if chunk.starts_with("{") {
+                            let chunk = StreamingChunk::Payload(chunk.to_owned());
+                            state.buffer.drain(..chunk_length);
+                            return Some((Ok(chunk), state));
+                        }
+
+                        let Some(index) = chunk.find(":") else {
+                            state.buffer.drain(..chunk_length);
+                            continue;
+                        };
+
+                        chunk = &chunk[index + 1..];
+                        if chunk.starts_with(" ") {
+                            chunk = &chunk[1..];
+                        }
+
+                        if chunk == "[DONE]" {
+                            state.buffer.clear();
+                            state.is_finished = true;
+                            continue;
+                        }
+
+                        if chunk == "OPENROUTER PROCESSING" {
+                            state.buffer.drain(..chunk_length);
+                            continue;
+                        }
+
+                        let chunk = StreamingChunk::Chunk(chunk.to_owned());
+                        state.buffer.drain(..chunk_length);
+                        return Some((Ok(chunk), state));
+                    };
+
+                    if state.is_finished {
+                        if !state.sent_finish {
+                            state.sent_finish = true;
+                            return Some((Ok(StreamingChunk::Finish), state));
+                        } else {
+                            return None;
+                        }
+                    }
+
+                    break match state.client.chunk().await {
+                        Ok(Some(new_chunk)) => {
+                            state.buffer.extend_from_slice(&new_chunk);
+                            continue;
+                        }
+                        Ok(None) => {
+                            state.is_finished = true;
+                            continue;
+                        }
+                        Err(error) => Some((Err(error), state)),
+                    };
+                }
+            }
+        },
+    )
+    .map(move |item| match item {
+        Ok(response) => response,
+        Err(error) => StreamingChunk::Error(format!("HTTP error: {error}")),
+    });
+
+    Ok(Box::pin(stream))
+}
+
 impl Request {
     async fn send_impl(
         &self,
@@ -697,7 +805,7 @@ impl Request {
             }
         };
 
-        Response::from_raw(&response, raw_request)
+        Response::from_raw(&response, Some(raw_request))
     }
 
     pub async fn send_streaming(
@@ -713,133 +821,41 @@ impl Request {
             Err(error) => return Err(error),
         };
 
-        struct State {
-            buffer: Vec<u8>,
-            client: reqwest::Response,
-            delta_state: Option<DeltaState>,
-        }
-
-        let raw_request_copy = raw_request.clone();
-        let stream = futures::stream::unfold(
-            State {
-                client,
-                buffer: Vec::new(),
-                delta_state: if enable_reconstruction { Some(Default::default()) } else { None },
-            },
-            move |mut state: State| {
-                // https://html.spec.whatwg.org/multipage/server-sent-events.html#parsing-an-event-stream
-
-                let raw_request = raw_request.clone();
-                async move {
-                    let mut is_finished = false;
-                    loop {
-                        let mut chunk_length = state.buffer.iter().position(|&ch| ch == b'\n' || ch == b'\r');
-                        if chunk_length.is_none() && is_finished && !state.buffer.is_empty() {
-                            chunk_length = Some(state.buffer.len());
-                        }
-
-                        if let Some(mut chunk_length) = chunk_length {
-                            let chunk = &state.buffer[..chunk_length];
-                            let Ok(mut chunk) = std::str::from_utf8(&chunk) else {
-                                return Some((
-                                    Ok(Response {
-                                        obj: Err("response is not valid UTF-8".into()),
-                                        raw: None,
-                                        original_request: Some(raw_request.clone()),
-                                    }),
-                                    state,
-                                ));
-                            };
-
-                            chunk_length += 1;
-                            if state.buffer.get(chunk_length).copied() == Some(b'\n') {
-                                chunk_length += 1;
-                            }
-
-                            chunk_length = chunk_length.min(state.buffer.len());
-
-                            if chunk.starts_with("{") {
-                                let chunk = Response::from_raw(&chunk, raw_request);
-                                state.buffer.drain(..chunk_length);
-                                return Some((Ok(chunk), state));
-                            }
-
-                            let Some(index) = chunk.find(":") else {
-                                state.buffer.drain(..chunk_length);
-                                continue;
-                            };
-
-                            chunk = &chunk[index + 1..];
-                            if chunk.starts_with(" ") {
-                                chunk = &chunk[1..];
-                            }
-
-                            if chunk == "[DONE]" {
-                                state.buffer.clear();
-                                is_finished = true;
-                                continue;
-                            }
-
-                            if chunk == "OPENROUTER PROCESSING" {
-                                state.buffer.drain(..chunk_length);
-                                continue;
-                            }
-
-                            let chunk = parse_response(&chunk, raw_request, state.delta_state.as_mut());
-                            state.buffer.drain(..chunk_length);
-                            return Some((Ok(chunk), state));
-                        };
-
-                        if is_finished {
-                            if let Some(delta_state) = state.delta_state.take() {
-                                match delta_state.finalize() {
-                                    Ok(response) => {
-                                        let response = serde_json::to_string(&response).unwrap();
-                                        let mut response = parse_response(&response, raw_request, None);
-                                        if let Ok(Ok(ref mut response)) = response.obj {
-                                            response.kind = ResponseKind::Reconstructed;
-                                        }
-
-                                        return Some((Ok(response), state));
-                                    }
-                                    Err(error) => {
-                                        return Some((
-                                            Ok(Response {
-                                                obj: Err(format!("failed to reconstruct a response from streaming chunks: {error}")),
-                                                raw: None,
-                                                original_request: Some(raw_request.clone()),
-                                            }),
-                                            state,
-                                        ));
-                                    }
+        let mut delta_state = if enable_reconstruction { Some(DeltaState::default()) } else { None };
+        let stream = handle_streaming(client)?.filter_map(move |chunk| {
+            let chunk = match chunk {
+                StreamingChunk::Payload(payload) => Some(Response::from_raw(&payload, Some(raw_request.clone()))),
+                StreamingChunk::Chunk(payload) => Some(parse_response(&payload, Some(raw_request.clone()), delta_state.as_mut())),
+                StreamingChunk::Finish => {
+                    if let Some(delta_state) = delta_state.take() {
+                        match delta_state.finalize() {
+                            Ok(response) => {
+                                let response = serde_json::to_string(&response).unwrap();
+                                let mut response = parse_response(&response, Some(raw_request.clone()), None);
+                                if let Ok(Ok(ref mut response)) = response.obj {
+                                    response.kind = ResponseKind::Reconstructed;
                                 }
-                            }
 
-                            return None;
+                                Some(response)
+                            }
+                            Err(error) => Some(Response {
+                                obj: Err(format!("failed to reconstruct a response from streaming chunks: {error}")),
+                                raw: None,
+                                original_request: Some(raw_request.clone()),
+                            }),
                         }
-
-                        break match state.client.chunk().await {
-                            Ok(Some(new_chunk)) => {
-                                state.buffer.extend_from_slice(&new_chunk);
-                                continue;
-                            }
-                            Ok(None) => {
-                                is_finished = true;
-                                continue;
-                            }
-                            Err(error) => Some((Err(error), state)),
-                        };
+                    } else {
+                        None
                     }
                 }
-            },
-        )
-        .map(move |item| match item {
-            Ok(response) => response,
-            Err(error) => Response {
-                obj: Err(format!("HTTP error: {error}")),
-                raw: None,
-                original_request: Some(raw_request_copy.clone()),
-            },
+                StreamingChunk::Error(error) => Some(Response {
+                    obj: Err(error),
+                    raw: None,
+                    original_request: Some(raw_request.clone()),
+                }),
+            };
+
+            futures::future::ready(chunk)
         });
 
         Ok(Box::pin(stream))
