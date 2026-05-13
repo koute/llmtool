@@ -241,6 +241,20 @@ pub struct ResponseOk {
     pub reasoning_content: Option<String>,
     pub usage: Option<Usage>,
     pub model: String,
+    pub kind: ResponseKind,
+}
+
+impl ResponseOk {
+    pub fn is_reconstructed(&self) -> bool {
+        matches!(self.kind, ResponseKind::Reconstructed)
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum ResponseKind {
+    Normal,
+    Streaming,
+    Reconstructed,
 }
 
 #[derive(Debug)]
@@ -262,11 +276,11 @@ impl Response {
     }
 
     pub fn from_raw(raw_string: &str, raw_request: Arc<String>) -> Self {
-        parse_response(raw_string, raw_request)
+        parse_response(raw_string, raw_request, None)
     }
 }
 
-fn parse_response(raw_string: &str, raw_request: Arc<String>) -> Response {
+fn parse_response(raw_string: &str, raw_request: Arc<String>, delta_state: Option<&mut DeltaState>) -> Response {
     let raw_value: Result<Value, _> = serde_json::from_str(raw_string);
     let raw = Some(raw_string.to_owned());
     let create_response = |obj| Response {
@@ -305,18 +319,31 @@ fn parse_response(raw_string: &str, raw_request: Arc<String>) -> Response {
                 return create_response(Err(format!("response returned an error: code {}: {}", error.code, error.message)));
             }
 
-            let (text, reasoning_content) = if let Some(message) = choice.message {
+            let (is_streaming, text, reasoning_content) = if let Some(message) = choice.message {
                 (
+                    false,
                     message.content.unwrap_or(String::new()),
                     message.reasoning_content.or(message.reasoning),
                 )
             } else if let Some(text) = choice.text {
-                (text, None)
+                (false, text, None)
             } else if let Some(delta) = choice.delta {
-                (delta.content.unwrap_or(String::new()), delta.reasoning_content.or(delta.reasoning))
+                (
+                    true,
+                    delta.content.unwrap_or(String::new()),
+                    delta.reasoning_content.or(delta.reasoning),
+                )
             } else {
                 return create_response(Err(format!("response is missing 'text' and 'message'")));
             };
+
+            if is_streaming {
+                if let Some(delta_state) = delta_state {
+                    if let Err(error) = delta_state.apply(&raw_value) {
+                        return create_response(Err(format!("failed to apply delta state: {error}")));
+                    }
+                }
+            }
 
             let response = ResponseOk {
                 finish_reason: choice.finish_reason,
@@ -324,6 +351,11 @@ fn parse_response(raw_string: &str, raw_request: Arc<String>) -> Response {
                 reasoning_content: reasoning_content,
                 model: response.model,
                 usage: response.usage,
+                kind: if is_streaming {
+                    ResponseKind::Streaming
+                } else {
+                    ResponseKind::Normal
+                },
             };
 
             Ok(Ok(response))
@@ -665,10 +697,14 @@ impl Request {
             }
         };
 
-        parse_response(&response, raw_request)
+        Response::from_raw(&response, raw_request)
     }
 
-    pub async fn send_streaming(&self, endpoint: &Endpoint) -> Result<Pin<Box<dyn futures::Stream<Item = Response>>>, String> {
+    pub async fn send_streaming(
+        &self,
+        endpoint: &Endpoint,
+        enable_reconstruction: bool,
+    ) -> Result<Pin<Box<dyn futures::Stream<Item = Response>>>, String> {
         let (client, raw_request) = match self.send_impl(endpoint, true).await {
             Ok((Ok(response), raw_request)) => (response, raw_request),
             Ok((Err(error), _)) => {
@@ -680,6 +716,7 @@ impl Request {
         struct State {
             buffer: Vec<u8>,
             client: reqwest::Response,
+            delta_state: Option<DeltaState>,
         }
 
         let raw_request_copy = raw_request.clone();
@@ -687,6 +724,7 @@ impl Request {
             State {
                 client,
                 buffer: Vec::new(),
+                delta_state: if enable_reconstruction { Some(Default::default()) } else { None },
             },
             move |mut state: State| {
                 // https://html.spec.whatwg.org/multipage/server-sent-events.html#parsing-an-event-stream
@@ -721,7 +759,7 @@ impl Request {
                             chunk_length = chunk_length.min(state.buffer.len());
 
                             if chunk.starts_with("{") {
-                                let chunk = parse_response(&chunk, raw_request);
+                                let chunk = Response::from_raw(&chunk, raw_request);
                                 state.buffer.drain(..chunk_length);
                                 return Some((Ok(chunk), state));
                             }
@@ -737,8 +775,9 @@ impl Request {
                             }
 
                             if chunk == "[DONE]" {
-                                state.buffer.drain(..chunk_length);
-                                return None;
+                                state.buffer.clear();
+                                is_finished = true;
+                                continue;
                             }
 
                             if chunk == "OPENROUTER PROCESSING" {
@@ -746,10 +785,38 @@ impl Request {
                                 continue;
                             }
 
-                            let chunk = parse_response(&chunk, raw_request);
+                            let chunk = parse_response(&chunk, raw_request, state.delta_state.as_mut());
                             state.buffer.drain(..chunk_length);
                             return Some((Ok(chunk), state));
                         };
+
+                        if is_finished {
+                            if let Some(delta_state) = state.delta_state.take() {
+                                match delta_state.finalize() {
+                                    Ok(response) => {
+                                        let response = serde_json::to_string(&response).unwrap();
+                                        let mut response = parse_response(&response, raw_request, None);
+                                        if let Ok(Ok(ref mut response)) = response.obj {
+                                            response.kind = ResponseKind::Reconstructed;
+                                        }
+
+                                        return Some((Ok(response), state));
+                                    }
+                                    Err(error) => {
+                                        return Some((
+                                            Ok(Response {
+                                                obj: Err(format!("failed to reconstruct a response from streaming chunks: {error}")),
+                                                raw: None,
+                                                original_request: Some(raw_request.clone()),
+                                            }),
+                                            state,
+                                        ));
+                                    }
+                                }
+                            }
+
+                            return None;
+                        }
 
                         break match state.client.chunk().await {
                             Ok(Some(new_chunk)) => {
@@ -758,11 +825,7 @@ impl Request {
                             }
                             Ok(None) => {
                                 is_finished = true;
-                                if !state.buffer.is_empty() {
-                                    continue;
-                                }
-
-                                None
+                                continue;
                             }
                             Err(error) => Some((Err(error), state)),
                         };
@@ -786,9 +849,172 @@ impl Request {
 #[test]
 fn test_parse_response_error_01() {
     let raw_response = include_str!("test-data/test-reply-01.json");
-    let response = parse_response(&raw_response, Default::default());
+    let response = Response::from_raw(&raw_response, Default::default());
     assert_eq!(
         response.obj.unwrap_err(),
         "response returned an error: code 502: Network connection lost."
     );
+}
+
+#[derive(Default)]
+struct DeltaState {
+    object: serde_json::Map<String, serde_json::Value>,
+    choice: serde_json::Map<String, serde_json::Value>,
+    role: Option<String>,
+    content: Option<String>,
+    reasoning: Option<String>,
+}
+
+impl DeltaState {
+    fn apply(&mut self, value: &serde_json::Value) -> Result<(), String> {
+        let serde_json::Value::Object(map) = value else {
+            return Err("value is not a map".into());
+        };
+
+        for (key, value) in map {
+            if key == "choices" {
+                let serde_json::Value::Array(choices) = value else {
+                    return Err("choices is not an array".into());
+                };
+
+                if choices.len() != 1 {
+                    return Err("choices has unexpected length".into());
+                }
+
+                let serde_json::Value::Object(choice) = &choices[0] else {
+                    return Err("choices is not an object".into());
+                };
+
+                if let Some(delta) = choice.get("delta").and_then(|delta| delta.as_object()) {
+                    if let Some(role) = delta.get("role").and_then(|role| role.as_str()) {
+                        self.role = Some(role.to_owned());
+                    }
+
+                    if let Some(s) = delta.get("content").and_then(|s| s.as_str()) {
+                        self.content.get_or_insert_default().push_str(&s);
+                    }
+
+                    if let Some(s) = delta.get("reasoning").and_then(|s| s.as_str()) {
+                        self.reasoning.get_or_insert_default().push_str(&s);
+                    }
+                }
+
+                for (subkey, subvalue) in choice {
+                    if subkey == "delta" || (subvalue.is_null() && self.choice.contains_key(&*subkey)) {
+                        continue;
+                    }
+
+                    self.choice.insert(subkey.into(), subvalue.clone());
+                }
+
+                continue;
+            }
+            self.object.insert(key.clone(), value.clone());
+        }
+
+        Ok(())
+    }
+
+    fn finalize(mut self) -> Result<serde_json::Value, String> {
+        let Some(role) = self.role else {
+            return Err("missing 'role'".into());
+        };
+
+        let Some(content) = self.content else {
+            return Err("missing 'content'".into());
+        };
+
+        let mut message = serde_json::json! {{
+            "role": role,
+            "content": content,
+            "refusal": null,
+            "reasoning": null,
+        }};
+
+        if let Some(reasoning) = self.reasoning {
+            message.as_object_mut().unwrap().insert("reasoning".into(), reasoning.into());
+        }
+
+        self.choice.insert("message".into(), message);
+        self.object.insert("choices".into(), serde_json::json! { [self.choice] });
+        self.object.insert("object".into(), "chat.completion".into());
+        Ok(serde_json::Value::Object(self.object))
+    }
+}
+
+#[cfg(test)]
+fn test_streaming_reconstruction(streaming_data: &str, non_streaming_data: &str, modify_non_streaming: fn(&mut serde_json::Value)) {
+    let mut state = DeltaState::default();
+
+    for line in streaming_data.lines() {
+        let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+        state.apply(&value).unwrap();
+    }
+
+    let response_streaming = state.finalize().unwrap();
+    let mut response_non_streaming: serde_json::Value = serde_json::from_str(&non_streaming_data).unwrap();
+    modify_non_streaming(&mut response_non_streaming);
+
+    if response_streaming != response_non_streaming {
+        eprintln!(
+            "Failed to reconstruct response!\nExpected response:\n{}\n\nReconstructed response:\n{}\n\n",
+            serde_json::to_string_pretty(&response_non_streaming).unwrap(),
+            serde_json::to_string_pretty(&response_streaming).unwrap()
+        );
+        panic!();
+    }
+}
+
+#[cfg(test)]
+fn clean_openrouter_response_to_match_streaming(response: &mut serde_json::Value) {
+    response.as_object_mut().unwrap().get_mut("choices").unwrap()[0]
+        .as_object_mut()
+        .unwrap()
+        .get_mut("message")
+        .unwrap()
+        .as_object_mut()
+        .unwrap()
+        .remove("reasoning_details");
+}
+
+#[cfg(test)]
+fn clean_local_response_to_match_streaming(response: &mut serde_json::Value) {
+    let obj = response.as_object_mut().unwrap();
+    for key in [
+        "service_tier",
+        "kv_transfer_params",
+        "system_fingerprint",
+        "usage",
+        "prompt_logprobs",
+    ] {
+        obj.remove(key);
+    }
+
+    let message = obj.get_mut("choices").unwrap().as_array_mut().unwrap()[0]
+        .as_object_mut()
+        .unwrap()
+        .get_mut("message")
+        .unwrap()
+        .as_object_mut()
+        .unwrap();
+
+    message.remove("annotations");
+    message.remove("audio");
+    message.remove("function_call");
+    message.remove("tool_calls");
+    message.remove("reasoning_content");
+}
+
+#[test]
+fn test_reconstruct_reply_from_streaming_openrouter() {
+    let streaming_data = include_str!("test-data/01-openrouter-streaming.jsonl");
+    let non_streaming_data = include_str!("test-data/01-openrouter-non-streaming.json");
+    test_streaming_reconstruction(streaming_data, non_streaming_data, clean_openrouter_response_to_match_streaming);
+}
+
+#[test]
+fn test_reconstruct_reply_from_streaming_local() {
+    let streaming_data = include_str!("test-data/01-local-streaming.jsonl");
+    let non_streaming_data = include_str!("test-data/01-local-non-streaming.json");
+    test_streaming_reconstruction(streaming_data, non_streaming_data, clean_local_response_to_match_streaming);
 }

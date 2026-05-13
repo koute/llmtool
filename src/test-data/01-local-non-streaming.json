@@ -1,0 +1,39 @@
+{
+    "id": "chatcmpl-af96d3ff9690454d",
+    "object": "chat.completion",
+    "created": 1768737722,
+    "model": "gpt-oss-120b-derestricted",
+    "choices": [
+        {
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "Hello! How can I help you today?",
+                "refusal": null,
+                "annotations": null,
+                "audio": null,
+                "function_call": null,
+                "tool_calls": [
+
+                ],
+                "reasoning": "The user typed \"test\". Probably they just want a response. I can reply \"Hello! How can I help you today?\"",
+                "reasoning_content": "The user typed \"test\". Probably they just want a response. I can reply \"Hello! How can I help you today?\""
+            },
+            "logprobs": null,
+            "finish_reason": "stop",
+            "stop_reason": null,
+            "token_ids": null
+        }
+    ],
+    "service_tier": null,
+    "system_fingerprint": null,
+    "usage": {
+        "prompt_tokens": 70,
+        "total_tokens": 115,
+        "completion_tokens": 45,
+        "prompt_tokens_details": null
+    },
+    "prompt_logprobs": null,
+    "prompt_token_ids": null,
+    "kv_transfer_params": null
+}

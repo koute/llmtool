@@ -6,6 +6,25 @@ use crate::openai_client;
 use crate::utils::{extract_response, prepare_chat_request_template, print_logs};
 use crate::{CommonArgs, IsEnabled, RequestKind, SingleRequestArgs, Thinking};
 
+async fn cache_response(
+    cache_address: &str,
+    request_for_cache: &serde_json::Value,
+    response: &openai_client::Response,
+    response_ok: &openai_client::ResponseOk,
+) -> Result<(), String> {
+    if response_ok.finish_reason == Some(openai_client::FinishReason::Stop) {
+        if let Some(ref raw_response) = response.raw {
+            if let Ok(raw_response) = serde_json::from_str(&raw_response) {
+                if let Err(error) = crate::cache::cache_put(cache_address, &request_for_cache, &raw_response).await {
+                    eprintln!("ERROR: Failed to cache request: {error}");
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub async fn main_single_request(
     mut common_args: CommonArgs,
     query: Vec<String>,
@@ -73,7 +92,7 @@ pub async fn main_single_request(
         },
     };
 
-    let use_cache = !disable_cache && !streaming;
+    let use_cache = !disable_cache;
     let cache_address = "127.0.0.1:9999";
     let mut cached_response: Option<(openai_client::ResponseOk, Option<String>)> = None;
     let request_for_cache = if use_cache {
@@ -103,10 +122,13 @@ pub async fn main_single_request(
         print_logs(&endpoint, &request.args);
     }
 
-    if streaming {
+    if streaming && cached_response.is_none() {
         let mut is_first = true;
         let mut is_thinking = false;
-        let mut stream = request.send_streaming(&endpoint).await.map_err(|error| error.to_string())?;
+        let mut stream = request
+            .send_streaming(&endpoint, use_cache || print_raw_response)
+            .await
+            .map_err(|error| error.to_string())?;
 
         while let Some(chunk) = stream.next().await {
             if print_raw_response {
@@ -117,6 +139,14 @@ pub async fn main_single_request(
             }
 
             let response = extract_response(&chunk)?;
+            if response.is_reconstructed() {
+                if let Some(request_for_cache) = request_for_cache {
+                    cache_response(cache_address, &request_for_cache, &chunk, response).await?;
+                }
+
+                break;
+            }
+
             let out = std::io::stdout();
             let mut out = out.lock();
             if is_first {
@@ -173,15 +203,7 @@ pub async fn main_single_request(
             let response = request.send(&endpoint).await;
             let response_ok = extract_response(&response)?;
             if let Some(request_for_cache) = request_for_cache {
-                if response_ok.finish_reason == Some(openai_client::FinishReason::Stop) {
-                    if let Some(ref raw_response) = response.raw {
-                        if let Ok(raw_response) = serde_json::from_str(&raw_response) {
-                            if let Err(error) = crate::cache::cache_put(cache_address, &request_for_cache, &raw_response).await {
-                                eprintln!("ERROR: Failed to cache request: {error}");
-                            }
-                        }
-                    }
-                }
+                cache_response(cache_address, &request_for_cache, &response, response_ok).await?;
             }
 
             (response_ok.clone(), response.raw)

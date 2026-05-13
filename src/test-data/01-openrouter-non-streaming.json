@@ -1,0 +1,50 @@
+{
+    "id": "gen-1768737690-c4bDLp7LF5V02YtiH6o7",
+    "provider": "Nvidia",
+    "model": "nvidia/nemotron-nano-9b-v2:free",
+    "object": "chat.completion",
+    "created": 1768737690,
+    "choices": [
+        {
+            "logprobs": null,
+            "finish_reason": "stop",
+            "native_finish_reason": "stop",
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "Hello! It looks like you sent \"test\". Could you clarify what you're testing or ask a question? I'm here to help! 😊\n",
+                "refusal": null,
+                "reasoning": "Okay, the user sent \"test\". That's pretty vague. I need to figure out what they're testing. Maybe they want to check if I'm responsive or if the system is working. Since there's no specific question, I should ask for more details.\n\nI should respond in a friendly manner, letting them know I'm here to help but need more information. Something like, \"Hello! It looks like you sent 'test'. Could you clarify what you're testing or ask a question? I'm here to help!\" That way, it's open-ended and encourages them to provide more context.\n",
+                "reasoning_details": [
+                    {
+                        "format": "unknown",
+                        "index": 0,
+                        "type": "reasoning.text",
+                        "text": "Okay, the user sent \"test\". That's pretty vague. I need to figure out what they're testing. Maybe they want to check if I'm responsive or if the system is working. Since there's no specific question, I should ask for more details.\n\nI should respond in a friendly manner, letting them know I'm here to help but need more information. Something like, \"Hello! It looks like you sent 'test'. Could you clarify what you're testing or ask a question? I'm here to help!\" That way, it's open-ended and encourages them to provide more context.\n"
+                    }
+                ]
+            }
+        }
+    ],
+    "usage": {
+        "prompt_tokens": 14,
+        "completion_tokens": 157,
+        "total_tokens": 171,
+        "cost": 0,
+        "is_byok": false,
+        "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0,
+            "video_tokens": 0
+        },
+        "cost_details": {
+            "upstream_inference_cost": null,
+            "upstream_inference_prompt_cost": 0,
+            "upstream_inference_completions_cost": 0
+        },
+        "completion_tokens_details": {
+            "reasoning_tokens": 136,
+            "image_tokens": 0
+        }
+    }
+}
