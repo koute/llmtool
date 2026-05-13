@@ -403,6 +403,8 @@ pub struct GenerationArgs {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub frequency_penalty: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub presence_penalty: Option<f32>,
@@ -428,6 +430,7 @@ impl RawGenerationArgs {
         raw.max_tokens = args.max_tokens;
         raw.temperature = args.temperature.map(F32);
         raw.top_p = args.top_p.map(F32);
+        raw.min_p = args.min_p.map(F32);
         raw.frequency_penalty = args.frequency_penalty.map(F32);
         raw.presence_penalty = args.presence_penalty.map(F32);
         raw.repetition_penalty = args.repetition_penalty.map(F32);
