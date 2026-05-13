@@ -207,31 +207,13 @@ enum Args {
     /// Batch query many requests.
     BatchQuery {
         #[clap(flatten)]
-        common_args: CommonArgs,
-
-        #[clap(flatten)]
         chat_args: ChatArgs,
 
         #[clap(flatten)]
         schema_args: SchemaArgs,
 
-        #[clap(long, short = 'i')]
-        input: PathBuf,
-
-        #[clap(long, short = 'o')]
-        output: PathBuf,
-
-        #[clap(long)]
-        save_raw: bool,
-
-        #[clap(long, short = 'j', default_value_t = 16)]
-        jobs: u32,
-
-        #[clap(long)]
-        quiet: bool,
-
-        #[clap(long)]
-        total_request_limit: Option<i64>,
+        #[clap(flatten)]
+        args: crate::cmd_batch_query::BatchQueryArgs,
     },
     /// Sanity-checks the model.
     SanityCheck(crate::cmd_sanity_check::SanityCheckArgs),
@@ -407,26 +389,10 @@ fn main() {
             single_request_args,
         )),
         Args::BatchQuery {
-            common_args,
             chat_args,
             schema_args,
-            input,
-            output,
-            save_raw,
-            jobs,
-            quiet,
-            total_request_limit,
-        } => big_runtime().block_on(crate::cmd_batch_query::main_batch_query(
-            common_args,
-            chat_args,
-            schema_args,
-            input,
-            output,
-            save_raw,
-            jobs,
-            quiet,
-            total_request_limit,
-        )),
+            args,
+        } => big_runtime().block_on(crate::cmd_batch_query::main_batch_query(chat_args, schema_args, args)),
         Args::ListModels { url } => small_runtime().block_on(main_list_models(url)),
         Args::CacheServer { host, port, cache_path } => {
             big_runtime().block_on(crate::cmd_cache_server::main_cache_server(&format!("{host}:{port}"), cache_path))

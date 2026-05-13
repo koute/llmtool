@@ -14,6 +14,30 @@ use crate::utils::{
 };
 use crate::{ChatArgs, CommonArgs, SchemaArgs};
 
+#[derive(clap::Args)]
+pub struct BatchQueryArgs {
+    #[clap(flatten)]
+    common_args: CommonArgs,
+
+    #[clap(long, short = 'i')]
+    input: PathBuf,
+
+    #[clap(long, short = 'o')]
+    output: PathBuf,
+
+    #[clap(long)]
+    save_raw: bool,
+
+    #[clap(long, short = 'j', default_value_t = 16)]
+    jobs: u32,
+
+    #[clap(long)]
+    quiet: bool,
+
+    #[clap(long)]
+    total_request_limit: Option<i64>,
+}
+
 #[derive(serde::Serialize)]
 struct BatchOutputLine<'a> {
     response: &'a str,
@@ -80,15 +104,17 @@ fn gather_hashes(raw_jsonl: &[u8], running: Option<Arc<AtomicBool>>) -> Result<H
 }
 
 pub async fn main_batch_query(
-    mut common_args: CommonArgs,
     chat_args: ChatArgs,
     schema_args: SchemaArgs,
-    input_path: PathBuf,
-    output_path: PathBuf,
-    save_raw: bool,
-    jobs: u32,
-    quiet: bool,
-    total_request_limit: Option<i64>,
+    BatchQueryArgs {
+        mut common_args,
+        input: input_path,
+        output: output_path,
+        save_raw,
+        jobs,
+        quiet,
+        total_request_limit,
+    }: BatchQueryArgs,
 ) -> Result<(), String> {
     let endpoint = common_args.common_setup().await?;
     let generation_args = common_args.get_generation_args()?;
