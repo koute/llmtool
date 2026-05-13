@@ -190,6 +190,8 @@ pub struct RawGenerationArgs {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<RawReasoning>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
 
     #[serde(skip_serializing_if = "is_false")]
     pub logprobs: bool,
@@ -1002,14 +1004,21 @@ impl Request {
                         unreachable!()
                     };
                     kwargs.insert("reasoning_effort".into(), reasoning_effort.clone().into());
-                    if reasoning_effort.chars().all(|ch| ch.is_numeric()) {
-                        let Ok(max_tokens) = reasoning_effort.parse() else {
-                            return Err("cannot parse 'reasoning_effort'".into());
-                        };
 
-                        raw_request.reasoning.get_or_insert_default().max_tokens = Some(max_tokens);
+                    if endpoint.is_openrouter() {
+                        // NOTE: vLLM doesn't accept this.
+                        if reasoning_effort.chars().all(|ch| ch.is_numeric()) {
+                            let Ok(max_tokens) = reasoning_effort.parse() else {
+                                return Err("cannot parse 'reasoning_effort'".into());
+                            };
+
+                            raw_request.reasoning.get_or_insert_default().max_tokens = Some(max_tokens);
+                        } else {
+                            raw_request.reasoning.get_or_insert_default().effort = Some(reasoning_effort.clone());
+                        }
                     } else {
-                        raw_request.reasoning.get_or_insert_default().effort = Some(reasoning_effort.clone());
+                        // OpenRouter does accept this, but rejects it if you use this and 'reasoning' field at the same time.
+                        raw_request.reasoning_effort = Some(reasoning_effort.clone());
                     }
                 }
 
