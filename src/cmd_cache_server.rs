@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-use crate::cache::{CacheRequest, CacheResponse};
+use crate::cache_client::{CacheRequest, CacheResponse};
 use crate::utils::{LinesWithRange, UniqueHash, hash_value, mmap_read};
 
 fn load_server_cache(blob: &[u8]) -> Result<HashMap<UniqueHash, Range<usize>>, String> {
@@ -325,13 +325,13 @@ mod tests {
         let test_key = serde_json::json!("test_key");
         let test_value = serde_json::json!("test_value");
 
-        crate::cache::cache_put(&address, &test_key, &test_value).await?;
+        crate::cache_client::cache_put(&address, &test_key, &test_value).await?;
 
-        let retrieved_value = crate::cache::cache_get(&address, &test_key).await?;
+        let retrieved_value = crate::cache_client::cache_get(&address, &test_key).await?;
         assert_eq!(retrieved_value, Some(test_value));
 
         let non_existent_key = serde_json::json!("non_existent_key");
-        let retrieved_value = crate::cache::cache_get(&address, &non_existent_key).await?;
+        let retrieved_value = crate::cache_client::cache_get(&address, &non_existent_key).await?;
         assert_eq!(retrieved_value, None);
 
         Ok(())

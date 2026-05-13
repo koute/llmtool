@@ -15,7 +15,7 @@ async fn cache_response(
     if response_ok.finish_reason == Some(openai_client::FinishReason::Stop) {
         if let Some(ref raw_response) = response.raw {
             if let Ok(raw_response) = serde_json::from_str(&raw_response) {
-                if let Err(error) = crate::cache::cache_put(cache_address, &request_for_cache, &raw_response).await {
+                if let Err(error) = crate::cache_client::cache_put(cache_address, &request_for_cache, &raw_response).await {
                     eprintln!("ERROR: Failed to cache request: {error}");
                 }
             }
@@ -101,7 +101,7 @@ pub async fn main_single_request(
         request_for_cache.args.priority = None;
 
         let request_for_cache = serde_json::to_value(&request_for_cache).unwrap();
-        match crate::cache::cache_get(cache_address, &request_for_cache).await {
+        match crate::cache_client::cache_get(cache_address, &request_for_cache).await {
             Ok(Some(response)) => {
                 // Converting it back to string is silly, but whatever.
                 let response = openai_client::Response::from_raw(&serde_json::to_string(&response).unwrap(), Arc::new(String::new()));

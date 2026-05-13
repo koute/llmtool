@@ -3,7 +3,7 @@ use clap::Parser;
 use openai_client::Endpoint;
 use std::path::PathBuf;
 
-mod cache;
+mod cache_client;
 mod cmd_batch_query;
 mod cmd_cache_server;
 mod cmd_single_request;
