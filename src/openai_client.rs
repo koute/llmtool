@@ -172,7 +172,9 @@ pub struct ResponseError {
     pub code: u32,
     pub message: String,
     #[serde(rename = "type")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub param: Option<String>,
 }
 
