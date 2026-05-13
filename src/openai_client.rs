@@ -881,7 +881,16 @@ impl Request {
                             map
                         }),
                     );
+                } else if raw_request.messages.iter().any(|message| message.reasoning.is_some()) {
+                    let chat_template_kwargs = raw_request.chat_template_kwargs.get_or_insert(Value::Object(Default::default()));
+                    let Value::Object(kwargs) = chat_template_kwargs else {
+                        unreachable!()
+                    };
+
+                    // For GLM-4.7/GLM-4.7-Flash. See: https://docs.z.ai/guides/capabilities/thinking-mode
+                    kwargs.insert("clear_thinking".into(), false.into());
                 }
+
                 if let Some(reasoning_effort) = reasoning_effort {
                     let chat_template_kwargs = raw_request.chat_template_kwargs.get_or_insert(Value::Object(Default::default()));
                     let Value::Object(kwargs) = chat_template_kwargs else {
