@@ -1073,7 +1073,7 @@ impl Request {
         &self,
         endpoint: &Endpoint,
         enable_reconstruction: bool,
-    ) -> Result<Pin<Box<dyn futures::Stream<Item = Response>>>, String> {
+    ) -> Result<Pin<Box<dyn futures::Stream<Item = Response> + Send + 'static>>, String> {
         let (client, raw_request) = match self.send_impl(endpoint, true).await {
             Ok((Ok(response), raw_request)) => (response, raw_request),
             Ok((Err(error), _)) => {
