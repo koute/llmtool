@@ -313,21 +313,26 @@ pub async fn main_batch_query(
                         }
                     };
 
-                    failure_accumulator.store(0, Ordering::Relaxed);
-
                     let now = time::OffsetDateTime::now_local().unwrap();
                     let entry = BatchOutputLine {
                         response: &response.content,
                         finish_reason: match response.finish_reason {
                             None => {
+                                // NOTE: OpenRouter sometimes returns these.
                                 let stderr = std::io::stderr();
                                 let mut stderr = stderr.lock();
                                 let _ = writeln!(&mut stderr, "\nERROR: missing finish reason!");
-                                if let Some(raw) = raw_response.raw {
-                                    let _ = writeln!(&mut stderr, "DEBUG: RAW RESPONSE:\n#{raw}");
-                                }
 
-                                break 'main_loop format!("missing finish reason");
+                                let failure_count = failure_accumulator.fetch_add(1, Ordering::Relaxed);
+                                if failure_count >= failure_threshold {
+                                    if let Some(raw) = raw_response.raw {
+                                        let _ = writeln!(&mut stderr, "DEBUG: RAW RESPONSE:\n#{raw}");
+                                    }
+
+                                    break 'main_loop format!("missing finish reason");
+                                } else {
+                                    continue;
+                                }
                             }
                             Some(openai_client::FinishReason::Length) => "length",
                             Some(openai_client::FinishReason::Stop) => "stop",
@@ -341,6 +346,8 @@ pub async fn main_batch_query(
                         raw_request: if save_raw { raw_response.raw_request_json() } else { None },
                         raw_response: if save_raw { raw_response.raw_json() } else { None },
                     };
+
+                    failure_accumulator.store(0, Ordering::Relaxed);
 
                     let mut output_line = serde_json::to_string(&entry).unwrap();
                     output_line.push('\n');
