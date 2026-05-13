@@ -121,13 +121,19 @@ pub fn split_blob_approximate(blob: &[u8], separator: &[u8], count: usize) -> Ve
 
 pub struct Lines<'a> {
     slice: &'a [u8],
+    emitted_last_line: bool,
 }
 
 impl<'a> Iterator for Lines<'a> {
     type Item = &'a [u8];
     fn next(&mut self) -> Option<Self::Item> {
         if self.slice.is_empty() {
-            return None;
+            return if !self.emitted_last_line {
+                self.emitted_last_line = true;
+                Some(b"")
+            } else {
+                None
+            };
         }
 
         if let Some(index) = memchr::memchr(b'\n', self.slice) {
@@ -143,16 +149,21 @@ impl<'a> Iterator for Lines<'a> {
 }
 
 impl<'a> Lines<'a> {
-    pub fn new(mut slice: &'a [u8]) -> Self {
-        while !slice.is_empty() && slice[0] == b'\n' {
-            slice = &slice[1..];
+    pub fn new(mut slice: &'a [u8], trim_empty_lines: bool) -> Self {
+        if trim_empty_lines {
+            while !slice.is_empty() && slice[0] == b'\n' {
+                slice = &slice[1..];
+            }
+
+            while !slice.is_empty() && slice[slice.len() - 1] == b'\n' {
+                slice = &slice[..slice.len() - 1];
+            }
         }
 
-        while !slice.is_empty() && slice[slice.len() - 1] == b'\n' {
-            slice = &slice[..slice.len() - 1];
+        Self {
+            slice,
+            emitted_last_line: trim_empty_lines,
         }
-
-        Self { slice }
     }
 }
 

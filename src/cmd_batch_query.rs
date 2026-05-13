@@ -38,7 +38,7 @@ fn gather_hashes(raw_jsonl: &[u8], running: Option<Arc<AtomicBool>>) -> Result<H
         .into_par_iter()
         .flat_map(|chunk| {
             let mut hashes = Vec::new();
-            for line in Lines::new(&raw_jsonl[chunk]) {
+            for line in Lines::new(&raw_jsonl[chunk], true) {
                 if !running.load(Ordering::Relaxed) {
                     break;
                 }
@@ -104,7 +104,7 @@ pub async fn main_batch_query(
             let chunks = split_blob_approximate(&input, b"\n", thread_count * 16);
             chunks
                 .into_par_iter()
-                .map(|chunk| Lines::new(&input[chunk]).filter(|line| !line.is_empty()).count())
+                .map(|chunk| Lines::new(&input[chunk], true).filter(|line| !line.is_empty()).count())
                 .sum()
         };
 
@@ -214,7 +214,7 @@ pub async fn main_batch_query(
                     return;
                 };
 
-                for line in Lines::new(&input[chunk]) {
+                for line in Lines::new(&input[chunk], true) {
                     if !running.load(Ordering::Relaxed) || soft_break.load(Ordering::Relaxed) {
                         return;
                     }
