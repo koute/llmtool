@@ -1,122 +1,22 @@
-use ahash::AHashMap as HashMap;
 use core::time::Duration;
-use std::io::Write;
-use std::ops::Range;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::Arc;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
+use crate::cache::Cache;
 use crate::cache_client::{CacheRequest, CacheResponse};
-use crate::utils::{LinesWithRange, UniqueHash, hash_value, mmap_read};
-
-fn load_server_cache(blob: &[u8]) -> Result<HashMap<UniqueHash, Range<usize>>, String> {
-    let mut cache = HashMap::new();
-    for (line, range) in LinesWithRange::new(blob) {
-        if line.is_empty() {
-            continue;
-        }
-
-        let cache_entry: serde_json::Value = match serde_json::from_slice(line) {
-            Ok(value) => value,
-            Err(error) => return Err(format!("failed to parse cache entry: {}", error)),
-        };
-
-        let serde_json::Value::Object(obj) = cache_entry else {
-            return Err("cache entry is not an object".to_string());
-        };
-
-        let Some(raw_request) = obj.get("request") else {
-            return Err("cache entry missing raw_request".to_string());
-        };
-
-        if !obj.contains_key("raw_response") {
-            return Err("cache entry missing raw_response".to_string());
-        };
-
-        let request_hash = hash_value(&raw_request);
-        cache.insert(request_hash, range);
-    }
-
-    Ok(cache)
-}
-
-fn get_from_storage(key_hash: UniqueHash, blob: &[u8], map: &RwLock<HashMap<UniqueHash, Range<usize>>>) -> Option<serde_json::Value> {
-    let range = {
-        let map = map.read().unwrap();
-        map.get(&key_hash)?.clone()
-    };
-
-    let line = blob.get(range.clone())?;
-    let cache_entry: serde_json::Value = serde_json::from_slice(line).ok()?;
-    let serde_json::Value::Object(mut obj) = cache_entry else {
-        return None;
-    };
-    obj.remove("raw_response")
-}
 
 async fn main_cache_server_impl(
     address: &str,
     cache_path: Option<PathBuf>,
 ) -> Result<Pin<Box<dyn futures::Future<Output = ()> + Send + 'static>>, String> {
-    struct Cache {
-        blob: Option<memmap2::Mmap>,
-        map_cold: RwLock<HashMap<UniqueHash, Range<usize>>>,
-        map_hot: RwLock<HashMap<UniqueHash, serde_json::Value>>,
-        fp: Option<Mutex<std::io::BufWriter<std::fs::File>>>,
-    }
-
-    let mut cache = Cache {
-        blob: None,
-        map_cold: RwLock::new(HashMap::new()),
-        map_hot: RwLock::new(HashMap::new()),
-        fp: None,
-    };
-
+    let mut cache = Cache::new();
     let verbose = false;
     if let Some(ref cache_path) = cache_path {
-        let mut output_needs_newline = false;
-
-        if cache_path.exists() {
-            eprintln!("INFO: Loading cache: {}", cache_path.display());
-            let blob = mmap_read(&cache_path)?;
-            if !blob.is_empty() && blob.last().copied() != Some(b'\n') {
-                output_needs_newline = true;
-            }
-
-            let map_cold = load_server_cache(&blob)?;
-            eprintln!("INFO: Loaded cache: {} entries", map_cold.len());
-
-            cache.map_cold = RwLock::new(map_cold);
-            cache.blob = Some(blob);
-        } else {
-            eprintln!(
-                "INFO: Cache file {} does not exist; starting with empty cache",
-                cache_path.display()
-            );
-        }
-
-        let fp = std::fs::OpenOptions::new()
-            .read(false)
-            .write(true)
-            .append(true)
-            .truncate(false)
-            .create(true)
-            .open(&cache_path)
-            .map_err(|error| format!("failed to open {} for writing: {error}", cache_path.display()))?;
-
-        let mut fp = std::io::BufWriter::new(fp);
-        if output_needs_newline {
-            fp.write_all(b"\n")
-                .map_err(|error| format!("failed to write a newline to {}: {error}", cache_path.display()))?;
-
-            fp.flush()
-                .map_err(|error| format!("failed to write a newline to {}: {error}", cache_path.display()))?;
-        }
-
-        cache.fp = Some(Mutex::new(fp));
+        cache.acquire(cache_path)?;
     } else {
         eprintln!("INFO: Running in memory-only mode");
     }
@@ -135,10 +35,7 @@ async fn main_cache_server_impl(
                     client
                 }
                 _ = flush_interval.tick() => {
-                    if let Some(ref fp) = cache.fp {
-                        let _ = fp.lock().unwrap().flush();
-                    }
-
+                    cache.flush();
                     continue;
                 }
             };
@@ -204,19 +101,7 @@ async fn main_cache_server_impl(
 
                 let response = match request {
                     CacheRequest::Get { key } => {
-                        let key_hash = hash_value(&key);
-
-                        let mut value = {
-                            let map = cache.map_hot.read().unwrap();
-                            map.get(&key_hash).cloned()
-                        };
-
-                        if value.is_none() {
-                            if let Some(ref blob) = cache.blob {
-                                value = get_from_storage(key_hash, &blob, &cache.map_cold);
-                            }
-                        }
-
+                        let value = cache.get(&key);
                         match value {
                             Some(value) => {
                                 let response = CacheResponse::Found(value.clone());
@@ -238,39 +123,7 @@ async fn main_cache_server_impl(
                         }
                     }
                     CacheRequest::Put { key, value } => {
-                        let key_hash = hash_value(&key);
-
-                        let value_clone = value.clone();
-                        let mut map_hot = cache.map_hot.write().unwrap();
-                        let write_to_file = match map_hot.entry(key_hash) {
-                            std::collections::hash_map::Entry::Occupied(_) => false,
-                            std::collections::hash_map::Entry::Vacant(entry) => {
-                                entry.insert(value_clone);
-                                true
-                            }
-                        };
-                        core::mem::drop(map_hot);
-
-                        if write_to_file {
-                            if let Some(ref fp) = cache.fp {
-                                let entry = serde_json::json!({
-                                    "request": key,
-                                    "raw_response": value,
-                                });
-                                if let Ok(mut entry) = serde_json::to_string(&entry) {
-                                    entry.push('\n');
-
-                                    let mut fp = fp.lock().unwrap();
-                                    let result = fp.write_all(entry.as_bytes());
-                                    core::mem::drop(fp);
-
-                                    if let Err(error) = result {
-                                        eprintln!("ERROR: Failed to write to cache: {error}");
-                                    }
-                                }
-                            }
-                        }
-
+                        cache.put(key, value);
                         Ok("".into())
                     }
                 };
