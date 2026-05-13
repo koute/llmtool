@@ -60,6 +60,10 @@ impl Endpoint {
     fn models_url(&self) -> String {
         format!("{}/v1/models", self.url)
     }
+
+    fn props_url(&self) -> String {
+        format!("{}/props", self.url)
+    }
 }
 
 fn is_false(value: &bool) -> bool {
@@ -455,11 +459,22 @@ struct RawModelInfo {
     id: String,
     max_model_len: Option<u32>,
     context_length: Option<u32>,
+    owned_by: Option<String>,
 }
 
 #[derive(serde::Deserialize, Debug)]
 struct RawModelsResponse {
     data: Vec<serde_json::Value>,
+}
+
+#[derive(serde::Deserialize, Debug)]
+struct RawDefaultGenerationSettings {
+    n_ctx: u32,
+}
+
+#[derive(serde::Deserialize, Debug)]
+struct RawModelProps {
+    default_generation_settings: RawDefaultGenerationSettings,
 }
 
 pub async fn fetch_models(endpoint: &Endpoint) -> Result<Vec<ModelInfo>, String> {
@@ -484,7 +499,28 @@ pub async fn fetch_models(endpoint: &Endpoint) -> Result<Vec<ModelInfo>, String>
             max_sequence_length: match raw_parsed_info.max_model_len.or(raw_parsed_info.context_length) {
                 Some(value) => value,
                 None => {
-                    return Err("failed to fetch models: reply is missing the context length field".into());
+                    if raw_parsed_info
+                        .owned_by
+                        .as_ref()
+                        .map(|owned_by| owned_by == "llamacpp")
+                        .unwrap_or(false)
+                    {
+                        let response = reqwest::Client::new()
+                            .get(&endpoint.props_url())
+                            .timeout(TIMEOUT)
+                            .send()
+                            .await
+                            .map_err(|error| format!("failed to fetch props: HTTP request failed: {error}"))?;
+
+                        let response = response
+                            .json::<RawModelProps>()
+                            .await
+                            .map_err(|error| format!("failed to fetch props: failed to parse reply as JSON: {error}"))?;
+
+                        response.default_generation_settings.n_ctx
+                    } else {
+                        return Err("failed to fetch models: reply is missing the context length field".into());
+                    }
                 }
             },
             raw_info,
