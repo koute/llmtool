@@ -4,7 +4,7 @@ use rayon::prelude::*;
 use std::io::Write;
 use std::ops::Range;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::openai_client;
@@ -88,6 +88,7 @@ pub async fn main_batch_query(
     save_raw: bool,
     jobs: u32,
     quiet: bool,
+    total_request_limit: Option<i64>,
 ) -> Result<(), String> {
     let endpoint = common_args.common_setup().await?;
     let generation_args = common_args.get_generation_args()?;
@@ -183,6 +184,7 @@ pub async fn main_batch_query(
     let input = Arc::new(input);
     let chunks = split_blob_approximate(&input, b"\n", jobs as usize * 16);
     let chunks: Arc<Mutex<Vec<Range<usize>>>> = Arc::new(Mutex::new(chunks));
+    let total_request_limit = Arc::new(AtomicI64::new(total_request_limit.unwrap_or(i64::MAX)));
     for _ in 0..jobs {
         let tx = tx.clone();
         let endpoint = endpoint.clone();
@@ -197,6 +199,7 @@ pub async fn main_batch_query(
         let skipped_count = skipped_count.clone();
         let job_count = job_count.clone();
         let failure_accumulator = failure_accumulator.clone();
+        let total_request_limit = total_request_limit.clone();
 
         struct DecrementOnDrop(Arc<AtomicU64>);
         impl Drop for DecrementOnDrop {
@@ -248,6 +251,10 @@ pub async fn main_batch_query(
                     let serde_json::Value::String(prompt) = prompt else {
                         break 'main_loop format!("failed to parse input file: 'prompt' key is not a string");
                     };
+
+                    if total_request_limit.fetch_sub(1, Ordering::Relaxed) <= 0 {
+                        return;
+                    }
 
                     let mut kind = (*chat_template).clone();
                     kind.messages.push(openai_client::Message::new("user".into(), prompt.clone()));

@@ -229,6 +229,9 @@ enum Args {
 
         #[clap(long)]
         quiet: bool,
+
+        #[clap(long)]
+        total_request_limit: Option<i64>,
     },
     /// Sanity-checks the model.
     SanityCheck(crate::cmd_sanity_check::SanityCheckArgs),
@@ -411,6 +414,7 @@ fn main() {
             save_raw,
             jobs,
             quiet,
+            total_request_limit,
         } => big_runtime().block_on(crate::cmd_batch_query::main_batch_query(
             common_args,
             chat_args,
@@ -420,6 +424,7 @@ fn main() {
             save_raw,
             jobs,
             quiet,
+            total_request_limit,
         )),
         Args::ListModels { url } => small_runtime().block_on(main_list_models(url)),
         Args::CacheServer { host, port, cache_path } => {
