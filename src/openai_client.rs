@@ -22,6 +22,7 @@ pub struct Endpoint {
     pub providers: Vec<String>,
     pub allow_fallbacks: bool,
     pub require_parameters: bool,
+    pub insecure: bool,
 }
 
 impl Endpoint {
@@ -32,6 +33,7 @@ impl Endpoint {
             providers: Vec::new(),
             allow_fallbacks: true,
             require_parameters: false,
+            insecure: false,
         }
     }
 
@@ -46,6 +48,7 @@ impl Endpoint {
             providers: Vec::new(),
             allow_fallbacks: true,
             require_parameters: true,
+            insecure: false,
         }
     }
 
@@ -71,6 +74,14 @@ impl Endpoint {
 
     fn props_url(&self) -> String {
         format!("{}/props", self.url)
+    }
+
+    fn client(&self) -> reqwest::Client {
+        reqwest::Client::builder()
+            .danger_accept_invalid_certs(self.insecure)
+            .danger_accept_invalid_hostnames(self.insecure)
+            .build()
+            .unwrap()
     }
 }
 
@@ -870,7 +881,7 @@ struct RawModelProps {
 }
 
 pub async fn fetch_models(endpoint: &Endpoint) -> Result<Vec<ModelInfo>, String> {
-    let response = reqwest::Client::new()
+    let response = endpoint.client()
         .get(&endpoint.models_url())
         .timeout(TIMEOUT)
         .send()
@@ -902,7 +913,7 @@ pub async fn fetch_models(endpoint: &Endpoint) -> Result<Vec<ModelInfo>, String>
                         .map(|owned_by| owned_by == "llamacpp")
                         .unwrap_or(false)
                     {
-                        let response = reqwest::Client::new()
+                        let response = endpoint.client()
                             .get(&endpoint.props_url())
                             .timeout(TIMEOUT)
                             .send()
@@ -1298,7 +1309,7 @@ impl Request {
             RequestKind::Chat(..) => endpoint.chat_url(),
         };
 
-        let client = reqwest::Client::new();
+        let client = endpoint.client();
         let mut client = client
             .post(&url)
             .timeout(TIMEOUT)

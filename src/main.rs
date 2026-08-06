@@ -77,6 +77,10 @@ pub struct CommonArgs {
     #[clap(long)]
     pub api_key: Option<String>,
 
+    /// Ignore invalid HTTPS certificates.
+    #[clap(long)]
+    pub insecure: bool,
+
     /// A comma-separated list of OpenRouter providers to use.
     #[clap(long)]
     pub provider: Option<String>,
@@ -344,6 +348,7 @@ impl CommonArgs {
                 providers: Vec::new(),
                 allow_fallbacks: true,
                 require_parameters: false,
+                insecure: false,
             }
         } else {
             if let Some(ref model) = self.model {
@@ -380,6 +385,10 @@ impl CommonArgs {
 
         if !endpoint.providers.is_empty() {
             endpoint.allow_fallbacks = false;
+        }
+
+        if self.insecure {
+            endpoint.insecure = true;
         }
 
         Ok(endpoint)
