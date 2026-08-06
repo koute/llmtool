@@ -4,8 +4,8 @@ use std::io::Write;
 use crate::openai_client;
 use crate::utils::{extract_response, prepare_chat_request_template, print_logs};
 use crate::{CommonArgs, DisplayThinking, IsEnabled, MessageFormat, RequestKind, SingleRequestArgs};
-use std::path::PathBuf;
 use base64::Engine;
+use std::path::PathBuf;
 
 async fn cache_response(
     cache_address: &str,
@@ -94,11 +94,10 @@ pub async fn main_single_request(
                     MessageFormat::Text => {
                         req.messages.push(openai_client::Message::new("user".into(), prompt));
                         if let Some(image_path) = image {
-                            let image_data = std::fs::read(&image_path)
-                                .map_err(|e| format!("failed to read image '{}': {e}", image_path.display()))?;
+                            let image_data =
+                                std::fs::read(&image_path).map_err(|e| format!("failed to read image '{}': {e}", image_path.display()))?;
                             let (image_data, mime) = if resize.is_some() || contrast.is_some() || saturation.is_some() {
-                                let mut img = image::load_from_memory(&image_data)
-                                    .map_err(|e| format!("failed to decode image: {e}"))?;
+                                let mut img = image::load_from_memory(&image_data).map_err(|e| format!("failed to decode image: {e}"))?;
 
                                 if let Some(contrast) = contrast {
                                     image::imageops::colorops::contrast_in_place(&mut img, contrast);
@@ -131,14 +130,19 @@ pub async fn main_single_request(
                                         _ => return Err("unsupported pixel type for resizing".into()),
                                     };
                                     let mut resizer = fast_image_resize::Resizer::new();
-                                    resizer.resize(&img, &mut dst_image, None)
+                                    resizer
+                                        .resize(&img, &mut dst_image, None)
                                         .map_err(|e| format!("failed to resize image: {e}"))?;
                                     img = dst_image;
                                 }
 
                                 let mut buf = Vec::new();
                                 let is_png = image_path.extension().and_then(|e| e.to_str()) == Some("png");
-                                let format = if is_png { image::ImageFormat::Png } else { image::ImageFormat::Jpeg };
+                                let format = if is_png {
+                                    image::ImageFormat::Png
+                                } else {
+                                    image::ImageFormat::Jpeg
+                                };
                                 let mime = if is_png { "image/png" } else { "image/jpeg" };
                                 img.write_to(&mut std::io::Cursor::new(&mut buf), format)
                                     .map_err(|e| format!("failed to encode image: {e}"))?;
@@ -358,11 +362,7 @@ fn rgb_to_hsl(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
     }
 
     let d = max - min;
-    let s = if l > 0.5 {
-        d / (2.0 - max - min)
-    } else {
-        d / (max + min)
-    };
+    let s = if l > 0.5 { d / (2.0 - max - min) } else { d / (max + min) };
 
     let mut h = if max == r {
         (g - b) / d + if g < b { 6.0 } else { 0.0 }
@@ -384,22 +384,14 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (u8, u8, u8) {
         g = l;
         b = l;
     } else {
-        let q = if l < 0.5 {
-            l * (1.0 + s)
-        } else {
-            l + s - l * s
-        };
+        let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
         let p = 2.0 * l - q;
         r = hue_to_rgb(p, q, h + 1.0 / 3.0);
         g = hue_to_rgb(p, q, h);
         b = hue_to_rgb(p, q, h - 1.0 / 3.0);
     }
 
-    (
-        (r * 255.0).round() as u8,
-        (g * 255.0).round() as u8,
-        (b * 255.0).round() as u8,
-    )
+    ((r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8)
 }
 
 fn hue_to_rgb(p: f32, q: f32, mut t: f32) -> f32 {
@@ -420,4 +412,3 @@ fn hue_to_rgb(p: f32, q: f32, mut t: f32) -> f32 {
     }
     p
 }
-

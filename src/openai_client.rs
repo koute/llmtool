@@ -889,7 +889,8 @@ struct RawModelProps {
 }
 
 pub async fn fetch_models(endpoint: &Endpoint) -> Result<Vec<ModelInfo>, String> {
-    let response = endpoint.client()
+    let response = endpoint
+        .client()
         .get(&endpoint.models_url())
         .timeout(TIMEOUT)
         .send()
@@ -921,7 +922,8 @@ pub async fn fetch_models(endpoint: &Endpoint) -> Result<Vec<ModelInfo>, String>
                         .map(|owned_by| owned_by == "llamacpp")
                         .unwrap_or(false)
                     {
-                        let response = endpoint.client()
+                        let response = endpoint
+                            .client()
                             .get(&endpoint.props_url())
                             .timeout(TIMEOUT)
                             .send()
