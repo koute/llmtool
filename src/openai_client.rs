@@ -200,6 +200,10 @@ pub struct RawGenerationArgs {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chat_template_kwargs: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub add_generation_prompt: Option<bool>,
+    #[serde(skip_serializing_if = "is_false")]
+    pub continue_final_message: bool,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_format: Option<RawResponseFormat>,
@@ -839,6 +843,10 @@ pub struct ChatRequest {
     pub tools: Vec<ToolDef>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<ToolChoice>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub add_generation_prompt: Option<bool>,
+    #[serde(skip_serializing_if = "is_false")]
+    pub continue_final_message: bool,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -1071,7 +1079,12 @@ impl Request {
                 ref schema,
                 ref tools,
                 ref tool_choice,
+                add_generation_prompt,
+                continue_final_message,
             }) => {
+                raw_request.add_generation_prompt = add_generation_prompt;
+                raw_request.continue_final_message = continue_final_message;
+
                 raw_request.messages = messages
                     .iter()
                     .map(|message| RawMessageOut {
@@ -1804,4 +1817,54 @@ fn test_truncated_stop_reason_fix() {
 
     let response = parse_response(&data_rsp, Some(Arc::new(data_req.into())), None).obj.unwrap();
     assert_eq!(response.unwrap().finish_reason, Some(FinishReason::Length));
+}
+
+#[cfg(test)]
+fn serialize_chat_body(add_generation_prompt: Option<bool>, continue_final_message: bool) -> String {
+    let request = Request {
+        args: GenerationArgs {
+            model: "test".into(),
+            seed: None,
+            max_tokens: None,
+            temperature: None,
+            top_k: None,
+            top_p: None,
+            min_p: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+            repetition_penalty: None,
+            repetition_penalty_range: None,
+            request_prompt_caching: false,
+            request_stream_usage: false,
+            priority: None,
+            logprobs: false,
+            top_logprobs: None,
+            include_special_tokens: false,
+            include_stop_token: false,
+            vllm_xargs: None,
+        },
+        kind: RequestKind::Chat(ChatRequest {
+            messages: vec![Message::new("user".into(), "hi".into())],
+            thinking: Thinking::Auto,
+            reasoning_effort: None,
+            schema: None,
+            tools: Vec::new(),
+            tool_choice: None,
+            add_generation_prompt,
+            continue_final_message,
+        }),
+    };
+
+    request.serialize_request(&Endpoint::local(1), false).unwrap()
+}
+
+#[test]
+fn test_the_chat_body_carries_the_resume_fields_only_when_asked() {
+    let resuming = serialize_chat_body(Some(false), true);
+    assert!(resuming.contains(r#""add_generation_prompt":false"#), "{resuming}");
+    assert!(resuming.contains(r#""continue_final_message":true"#), "{resuming}");
+
+    let plain = serialize_chat_body(None, false);
+    assert!(!plain.contains("add_generation_prompt"), "{plain}");
+    assert!(!plain.contains("continue_final_message"), "{plain}");
 }

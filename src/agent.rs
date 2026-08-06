@@ -565,6 +565,8 @@ impl Mutex<Agent> {
             schema: None,
             tools: state.tools.iter().map(|tool| tool.definition()).collect(),
             tool_choice: Some(openai_client::ToolChoice::Auto),
+            add_generation_prompt: None,
+            continue_final_message: false,
         };
 
         let request = openai_client::Request {
