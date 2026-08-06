@@ -305,6 +305,7 @@ impl CommonArgs {
             repetition_penalty: self.repetition_penalty,
             repetition_penalty_range: self.repetition_penalty_range,
             request_prompt_caching: self.request_prompt_caching,
+            request_stream_usage: false,
             priority: self.niceness,
             logprobs: self.logprobs,
             top_logprobs: self.top_logprobs,

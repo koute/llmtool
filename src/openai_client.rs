@@ -110,6 +110,11 @@ pub struct RawStructuredOutputs {
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize, Default)]
+pub struct RawStreamOptions {
+    pub include_usage: bool,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize, Default)]
 pub struct RawReasoning {
     // Can be one or the other.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -138,6 +143,8 @@ pub struct RawGenerationArgs {
     pub cache_prompt: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream_options: Option<RawStreamOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub priority: Option<i64>,
 
@@ -476,6 +483,24 @@ fn parse_response(raw_string: &str, original_request: Option<Arc<String>>, delta
     let obj = match response {
         Ok(response) => {
             let Some(choice) = response.choices.into_iter().next() else {
+                if response.usage.is_some() {
+                    if let Some(delta_state) = delta_state {
+                        if let Err(error) = delta_state.apply(&raw_value) {
+                            return create_response(Err(format!("failed to apply delta state: {error}")));
+                        }
+                    }
+
+                    return create_response(Ok(Ok(ResponseOk {
+                        finish_reason: None,
+                        content: String::new(),
+                        reasoning_content: None,
+                        model: response.model,
+                        usage: response.usage,
+                        kind: ResponseKind::Streaming,
+                        tool_calls: Vec::new(),
+                    })));
+                }
+
                 return create_response(Err(format!("response is missing choices")));
             };
 
@@ -590,6 +615,8 @@ pub struct GenerationArgs {
     pub repetition_penalty_range: Option<u32>,
     #[serde(skip_serializing_if = "is_false")]
     pub request_prompt_caching: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub request_stream_usage: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub priority: Option<i64>,
     #[serde(skip_serializing_if = "is_false")]
@@ -1018,6 +1045,9 @@ impl Request {
     pub fn serialize_request(&self, endpoint: &Endpoint, stream: bool) -> Result<String, String> {
         let mut raw_request = RawGenerationArgs::new(endpoint, &self.args);
         raw_request.stream = stream;
+        if stream && self.args.request_stream_usage {
+            raw_request.stream_options = Some(RawStreamOptions { include_usage: true });
+        }
 
         match self.kind {
             RequestKind::Completion(CompletionRequest { ref prompt }) => {
@@ -1378,6 +1408,14 @@ impl Request {
 
         Ok(Box::pin(stream))
     }
+}
+
+#[test]
+fn test_parse_usage_only_streaming_chunk() {
+    let raw_response = r#"{"id":"x","object":"chat.completion.chunk","created":1,"model":"m","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5}}"#;
+    let response = parse_response(&raw_response, None, None).obj.unwrap().unwrap();
+    assert_eq!(response.content, "");
+    assert_eq!(response.usage.unwrap().prompt_tokens, 10);
 }
 
 #[test]
