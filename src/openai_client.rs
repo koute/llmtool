@@ -824,6 +824,7 @@ struct RawModelInfo {
     max_model_len: Option<u32>,
     context_length: Option<u32>,
     owned_by: Option<String>,
+    parent: Option<String>,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -857,6 +858,11 @@ pub async fn fetch_models(endpoint: &Endpoint) -> Result<Vec<ModelInfo>, String>
     for raw_info in response.data {
         let raw_parsed_info = serde_json::from_value::<RawModelInfo>(raw_info.clone())
             .map_err(|error| format!("failed to fetch models: failed to parse reply: {error}"))?;
+
+        if raw_parsed_info.parent.is_some() {
+            // For now skip LoRA adapters.
+            continue;
+        }
 
         output.push(ModelInfo {
             name: raw_parsed_info.id,
