@@ -202,6 +202,9 @@ pub struct RawGenerationArgs {
     pub skip_special_tokens: Option<bool>,
     #[serde(skip_serializing_if = "is_false")]
     pub include_stop_str_in_output: bool,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vllm_xargs: Option<Value>,
 }
 
 const TIMEOUT: core::time::Duration = core::time::Duration::from_secs(120 * 60);
@@ -597,6 +600,8 @@ pub struct GenerationArgs {
     pub include_special_tokens: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub include_stop_token: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vllm_xargs: Option<Value>,
 }
 
 impl RawGenerationArgs {
@@ -623,6 +628,7 @@ impl RawGenerationArgs {
         if args.include_stop_token {
             raw.include_stop_str_in_output = true;
         }
+        raw.vllm_xargs = args.vllm_xargs.clone();
         if !endpoint.providers.is_empty() {
             raw.provider = Some(RawProvider {
                 order: endpoint.providers.clone(),

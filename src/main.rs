@@ -96,6 +96,10 @@ pub struct CommonArgs {
 
     #[clap(long)]
     pub include_stop_token: bool,
+
+    /// Custom arguments to send as `vllm_xargs`, given as a JSON object, e.g. '{"my_arg": 67}'. See: https://docs.vllm.ai/en/latest/features/custom_arguments/
+    #[clap(long)]
+    pub vllm_xargs: Option<String>,
 }
 
 #[derive(Copy, Clone, clap::ValueEnum)]
@@ -306,6 +310,19 @@ impl CommonArgs {
             top_logprobs: self.top_logprobs,
             include_special_tokens: self.include_special_tokens,
             include_stop_token: self.include_stop_token,
+            vllm_xargs: match self.vllm_xargs {
+                Some(ref value) => {
+                    let value: serde_json::Value = match serde_json::from_str(value) {
+                        Ok(value) => value,
+                        Err(error) => return Err(format!("failed to parse '--vllm-xargs' as JSON: {error}")),
+                    };
+                    if !value.is_object() {
+                        return Err("'--vllm-xargs' must be a JSON object".into());
+                    }
+                    Some(value)
+                }
+                None => None,
+            },
         })
     }
 
