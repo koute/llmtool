@@ -63,8 +63,11 @@ pub async fn main_sanity_check(
     let prompt = if !hard { decrypt(&PROMPT.trim()) } else { hard_prompt() };
 
     let endpoint = common_args.common_setup().await?;
+    let mut args = common_args.get_generation_args()?;
+    args.request_stream_usage = true;
+
     let request = openai_client::Request {
-        args: common_args.get_generation_args()?,
+        args,
         kind: {
             let mut req = prepare_chat_request_template(&chat_args, &SchemaArgs::default())?;
             req.messages.push(openai_client::Message::new("user".into(), prompt));
@@ -75,8 +78,18 @@ pub async fn main_sanity_check(
     let mut output = String::new();
     let mut stream = request.send_streaming(&endpoint, false).await.map_err(|error| error.to_string())?;
     let mut is_thinking = false;
+    let mut usage = None;
+    let mut timestamp_first_token = None;
     while let Some(chunk) = stream.next().await {
         let response = extract_response(&chunk)?;
+
+        if timestamp_first_token.is_none() {
+            timestamp_first_token = Some(std::time::Instant::now());
+        }
+
+        if response.usage.is_some() {
+            usage = response.usage.clone();
+        }
 
         let out = std::io::stdout();
         let mut out = out.lock();
@@ -111,11 +124,20 @@ pub async fn main_sanity_check(
     let output = output.trim();
     let output = output.lines().last().unwrap_or("");
     let expected = decrypt(EXPECTED_ANSWER);
+    println!("\n\n");
+
+    if let (Some(usage), Some(timestamp)) = (usage, timestamp_first_token) {
+        let tokens = usage.completion_tokens;
+        let time = timestamp.elapsed().as_secs_f64();
+        let speed = tokens as f64 / time;
+        println!("Processing time: {time:.1}s ({speed:.1}) tg/s\n");
+    }
+
     if output == expected || output == format!("**{expected}**") {
-        println!("\n\n{VT_GREEN}SANITY CHECK OK!{VT_RESET}");
+        println!("{VT_GREEN}SANITY CHECK OK!{VT_RESET}");
         Ok(())
     } else {
-        println!("\n\n{VT_RED}SANITY CHECK FAIL! EXPECTED: \"{expected}\"{VT_RESET}");
+        println!("{VT_RED}SANITY CHECK FAIL! EXPECTED: \"{expected}\"{VT_RESET}");
         Err(format!("sanity check failed"))
     }
 }
